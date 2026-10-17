@@ -382,6 +382,12 @@
   background-color: #f5f5f5;
 }
 
+/* 将已完成的连线限制在独立层内，避免 React Flow 在编组 / 选中时
+   自动抬高 SVG 的 z-index 后盖住资源。拖线预览不在这个容器内。 */
+[data-canvas-mode] .react-flow__edges {
+  z-index: -1;
+}
+
 /* 编组用的是自定义组件（group-node.tsx），框和底色都自己画。
    React Flow 会给 group 类型套一层默认样式（白底 + 1px 边框 + 10px padding），
    不清掉的话会在自定义的虚线框外面再透出一圈白盒子，padding 还会把内容顶偏。
@@ -391,4 +397,10 @@
   border: none;
   border-radius: 0;
   padding: 0;
+}
+
+/* 编组背景放在连线下方，组内连线仍然可见。 */
+[data-canvas-mode] .react-flow__node.react-flow__node-group {
+  /* biome-ignore lint/complexity/noImportantStyles: 覆盖 React Flow 选中编组时写入的内联层级 */
+  z-index: -2 !important;
 }
