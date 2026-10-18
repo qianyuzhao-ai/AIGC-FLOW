@@ -14,6 +14,8 @@ type AutosaveOptions = {
   edges: Edge[];
   getViewport: () => Viewport;
   initialGraph: ProjectGraph;
+  initialVersion: number;
+  readGraph?: () => ProjectGraph;
 };
 export function useGraphAutosave({
   projectId,
@@ -21,10 +23,13 @@ export function useGraphAutosave({
   edges,
   getViewport,
   initialGraph,
+  initialVersion,
+  readGraph,
 }: AutosaveOptions) {
+  const version = useRef(initialVersion);
   const [status, setStatus] = useState<SaveStatus>("saved");
   const read = useRef(() => toPersistedGraph(nodes, edges, getViewport()));
-  read.current = () => toPersistedGraph(nodes, edges, getViewport());
+  read.current = readGraph ?? (() => toPersistedGraph(nodes, edges, getViewport()));
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previous = useRef<{ nodes: Node[]; edges: Edge[] } | undefined>(undefined);
   const [queue] = useState(
@@ -35,9 +40,10 @@ export function useGraphAutosave({
         async (graph) => {
           const response = await api.api.projects[":id"].graph.$put({
             param: { id: String(projectId) },
-            json: graph,
+            json: { graph, expectedVersion: version.current },
           });
           if (!response.ok) throw new Error("保存失败");
+          version.current = (await response.json()).version;
         },
         isSameGraph,
         setStatus,

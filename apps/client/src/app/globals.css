@@ -5,6 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --pi-chat-width: min(400px, calc(100vw - 2rem));
   --desktop-titlebar: #e5e5e5;
   --desktop-tab-inactive: #d4d4d4;
   --desktop-tab-hover: #e0e0e0;

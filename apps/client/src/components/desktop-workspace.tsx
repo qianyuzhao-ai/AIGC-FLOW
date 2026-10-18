@@ -18,6 +18,7 @@ import { getDesktopApi, type ProjectSession, WorkspaceContext } from "@/lib/desk
 import { getTaskCount } from "@/lib/desktop-tasks";
 import { DesktopLifecycle } from "./desktop-lifecycle";
 import { DesktopTabBar } from "./desktop-tab-bar";
+import { WebProjectHost } from "./web-project-host";
 
 const ResidentCanvas = lazy(() =>
   import("@/components/canvas/canvas-page").then((module) => ({
@@ -180,7 +181,7 @@ export function DesktopWorkspace({ children }: { children: ReactNode }) {
     [state.activeId, activate, close, report],
   );
 
-  if (!windowState) return children;
+  if (!windowState) return <WebProjectHost>{children}</WebProjectHost>;
   return (
     <WorkspaceContext.Provider value={value}>
       <div className="desktop-workspace">

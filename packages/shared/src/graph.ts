@@ -52,6 +52,10 @@ export const projectGraphSchema = z.object({
 export type CanvasNode = z.infer<typeof canvasNodeSchema>;
 export type CanvasEdge = z.infer<typeof canvasEdgeSchema>;
 export type ProjectGraph = z.infer<typeof projectGraphSchema>;
+export const saveGraphSchema = z.object({
+  graph: projectGraphSchema,
+  expectedVersion: z.number().int().nonnegative(),
+});
 
 /** 编组在 React Flow 里的 node.type。用的是 React Flow 内置的 group 语义 */
 export const GROUP_NODE_TYPE = "group";

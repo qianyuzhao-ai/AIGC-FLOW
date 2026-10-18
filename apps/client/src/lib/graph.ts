@@ -6,7 +6,6 @@ import {
   MEDIA_NODE_TYPE,
   type MediaNodeData,
   type ProjectGraph,
-  STORYBOARD_NODE_TYPE,
   TEXT_NODE_TYPE,
   VIDEO_GEN_NODE_TYPE,
 } from "@aigc-flow/shared";
@@ -18,12 +17,7 @@ import { type Edge, type Node, Position, type Viewport } from "@xyflow/react";
  * 只会留下一个永远"上传中"的死节点。
  */
 /** 尺寸要落盘的节点类型：这几种的尺寸是用户定的，不是内容撑出来的 */
-const SIZED_NODE_TYPES = new Set<string>([
-  MEDIA_NODE_TYPE,
-  GROUP_NODE_TYPE,
-  TEXT_NODE_TYPE,
-  STORYBOARD_NODE_TYPE,
-]);
+const SIZED_NODE_TYPES = new Set<string>([MEDIA_NODE_TYPE, GROUP_NODE_TYPE, TEXT_NODE_TYPE]);
 
 function isPersistable(node: Node): boolean {
   if (node.type !== MEDIA_NODE_TYPE) return true;
@@ -141,7 +135,7 @@ export function fromPersistedGraph(graph: ProjectGraph): { nodes: Node[]; edges:
   return {
     // React Flow 要求父节点排在子节点前面，否则子节点挂不上去，直接报错。
     // 落盘顺序不保证这一点（编组是后建的，会排在成员后面），这里统一重排一次。
-    nodes: sortParentsFirst(graph.nodes).map((node) => ({
+    nodes: sortParentsFirst(graph.nodes.map(restoreLegacyNode)).map((node) => ({
       id: node.id,
       type: node.type,
       position: node.position,
@@ -175,12 +169,41 @@ export function fromPersistedGraph(graph: ProjectGraph): { nodes: Node[]; edges:
   };
 }
 
-/** 「生成中」是运行时状态的节点类型，落盘一律回退成 idle */
+/** Retired table nodes become editable text without dropping the user's row content. */
+function restoreLegacyNode(node: CanvasNode): CanvasNode {
+  if (node.type !== "storyboard") return node;
+  const labels: Record<string, string> = {
+    shotNumber: "镜号",
+    shot: "镜头",
+    duration: "时长（秒）",
+    dialogue: "台词",
+    performance: "表演",
+    performancePrompt: "表演 Prompt",
+  };
+  const rows: unknown[] = Array.isArray(node.data.rows) ? node.data.rows : [];
+  const text = rows
+    .map((row, index) => {
+      if (!row || typeof row !== "object") return String(row ?? "");
+      const lines = Object.entries(row)
+        .filter(([key, value]) => key !== "id" && value != null && value !== "")
+        .map(
+          ([key, value]) =>
+            `${labels[key] ?? key}：${typeof value === "object" ? JSON.stringify(value) : String(value)}`,
+        );
+      return lines.length ? `第 ${index + 1} 镜\n${lines.join("\n")}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  const { rows: _rows, ...data } = node.data;
+  return { ...node, type: TEXT_NODE_TYPE, data: { ...data, text } };
+}
+
+/** 运行状态由生成任务查询恢复，画布快照本身不维持加载动画。 */
 const GENERATING_NODE_TYPES = new Set<string>([IMAGE_GEN_NODE_TYPE, VIDEO_GEN_NODE_TYPE]);
 
 /**
  * 生成类节点的「生成中」是运行时状态，落盘一律回退成 idle ——
- * 刷新后请求已经断了，存下来只会是一个永远转圈的死节点。
+ * 刷新后由 generationJobId / generationRequestId 查询实际状态。
  */
 function persistedData(node: Node): CanvasNode["data"] {
   const data: CanvasNode["data"] = {
@@ -191,6 +214,13 @@ function persistedData(node: Node): CanvasNode["data"] {
     return { ...data, status: "idle" };
   }
   return data;
+}
+
+/** A copied node keeps its media, but never inherits ownership of another node's task. */
+export function copiedNodeData(data: Record<string, unknown>): Record<string, unknown> {
+  const { generationJobId: _job, generationRequestId: _request, ...copy } = structuredClone(data);
+  if (copy.status === "generating") copy.status = copy.resultUrl ? "ready" : "idle";
+  return copy;
 }
 
 /** 父节点排前、子节点排后。只有一层父子，不用做拓扑排序 */
