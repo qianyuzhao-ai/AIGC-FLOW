@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
-import { CanvasPortalContext } from "@/lib/desktop";
+import { CanvasActivityContext, CanvasPortalContext } from "@/lib/desktop";
 
 /** Keep hidden canvases mounted and measurable, but make them inert and silent. */
 export function DesktopLifecycle({
@@ -35,7 +35,7 @@ export function DesktopLifecycle({
       inert={!active}
     >
       <CanvasPortalContext.Provider value={panel ?? undefined}>
-        {children}
+        <CanvasActivityContext.Provider value={active}>{children}</CanvasActivityContext.Provider>
       </CanvasPortalContext.Provider>
     </div>
   );

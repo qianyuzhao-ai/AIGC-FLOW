@@ -38,6 +38,7 @@ import {
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useProjectAgent } from "@/components/agent-workspace";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -49,8 +50,6 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { useCanvasActions } from "@/hooks/use-canvas-actions";
-import { api } from "@/lib/api";
-import { beginDesktopTask } from "@/lib/desktop-tasks";
 import { downloadItemOf } from "@/lib/download";
 import { resizedImageUrl, THUMB_WIDTH } from "@/lib/media-url";
 import { nodeMarkOf } from "@/lib/node-mark";
@@ -87,6 +86,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps) {
   const gen = data as unknown as VideoGenNodeData;
   const { updateNodeData } = useReactFlow();
   const { activeNodeId, dropTargetId, setNodeMark, duplicateNode, projectId } = useCanvasActions();
+  const agent = useProjectAgent(projectId);
   const showMenu = Boolean(selected) && activeNodeId === id;
   // 右侧功能面板（下载 / 全屏）和下方菜单同时出现，且只在已经出结果时才有东西可操作
   const actionItem = showMenu ? downloadItemOf({ id, type: VIDEO_GEN_NODE_TYPE, data }) : null;
@@ -102,7 +102,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps) {
   // 三个列表的上限对齐接口约定：首尾帧模式只取前两张图（首帧、尾帧）、不支持参考视频。
   // 发请求用的 image_list / video_list / audio_list 直接用 hook 给的 urls：
   // prompt 里 @ 引用的占位符序号对应各列表的下标，必须出自同一份列表
-  const { texts, refs, resolvedPrompt, urls } = usePromptTokens(id, gen.prompt, sources, {
+  const { texts, refs, resolvedPrompt } = usePromptTokens(id, gen.prompt, sources, {
     image: isFrames ? MAX_FRAME_IMAGES : MAX_REFERENCE_IMAGES,
     video: isFrames ? 0 : MAX_VIDEO_REFS,
     audio: MAX_AUDIO_REFS,
@@ -139,49 +139,10 @@ export function VideoGenNode({ id, data, selected }: NodeProps) {
   /** 点生成：同图像节点的状态机。内网接口同步阻塞，视频可能要等几分钟 */
   async function handleGenerate() {
     if (generating) return;
-    // 清掉上一条的尺寸：新视频加载出来之前，信息条不该还挂着旧数字。
-    // 标记跟结果走：采用 / 废弃是给上一个结果打的，一起清掉
-    updateNodeData(id, {
-      status: "generating",
-      error: undefined,
-      naturalWidth: undefined,
-      naturalHeight: undefined,
-      mark: undefined,
-    });
-
-    const finish = beginDesktopTask(projectId);
     try {
-      const res = await api.api.generate.video.$post({
-        json: {
-          projectId,
-          version: gen.version,
-          mode: gen.mode,
-          prompt: resolvedPrompt,
-          imageList: urls.image,
-          videoList: urls.video,
-          audioList: urls.audio,
-          resolution: gen.resolution,
-          ratio: gen.ratio,
-          duration: gen.duration,
-          generateAudio: gen.generateAudio,
-        },
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        const message = body?.message ?? `生成失败（${res.status}）`;
-        toast.error("视频生成失败", { description: message });
-        updateNodeData(id, { status: "error", error: message });
-        return;
-      }
-
-      const { url } = (await res.json()) as { url: string };
-      updateNodeData(id, { status: "ready", resultUrl: url, error: undefined });
-    } catch {
-      toast.error("视频生成失败", { description: "连不上服务，确认 server 已启动" });
-      updateNodeData(id, { status: "error", error: "连不上服务，确认 server 已启动" });
-    } finally {
-      finish();
+      await agent.generate(id);
+    } catch (error) {
+      toast.error("生成失败", { description: error instanceof Error ? error.message : "提交失败" });
     }
   }
 

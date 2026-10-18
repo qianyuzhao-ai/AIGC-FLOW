@@ -58,6 +58,20 @@ graphs.set(3, {
 });
 let rejectWrites = false;
 let releaseGeneration: (() => void) | undefined;
+const versions = new Map<number, number>();
+const jobs = new Map<
+  string,
+  {
+    id: string;
+    projectId: number;
+    nodeId: string;
+    kind: string;
+    input: unknown;
+    status: string;
+    resultUrl: string | null;
+    error: null;
+  }
+>();
 let generationPending = false;
 const prompts: string[] = [];
 const responses: number[] = [];
@@ -81,7 +95,10 @@ const server = createServer(async (request, response) => {
       let body = "";
       for await (const chunk of request) body += chunk;
       if (rejectWrites) return send({ message: "isolated save failure" }, 500);
-      graphs.set(id, JSON.parse(body));
+      const parsed = JSON.parse(body);
+      graphs.set(id, parsed.graph);
+      versions.set(id, (versions.get(id) ?? 0) + 1);
+      return send({ id, version: versions.get(id) });
     }
     if (request.method === "PATCH") {
       let body = "";
@@ -89,7 +106,39 @@ const server = createServer(async (request, response) => {
       await new Promise((done) => setTimeout(done, 250));
       Object.assign(projects.find((item) => item.id === id) ?? {}, JSON.parse(body));
     }
-    return send(project[2] ? graphs.get(id) : projects.find((item) => item.id === id));
+    return send(
+      project[2]
+        ? { graph: graphs.get(id), version: versions.get(id) ?? 0 }
+        : projects.find((item) => item.id === id),
+    );
+  }
+  const jobRoute = /^\/api\/generation-jobs\/(\d+)\/jobs(?:\/([^/]+))?$/.exec(url.pathname);
+  if (jobRoute) {
+    if (request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const input = JSON.parse(body);
+      const id = crypto.randomUUID();
+      const job = {
+        id,
+        projectId: Number(jobRoute[1]),
+        nodeId: input.nodeId,
+        kind: input.kind,
+        input: input.input,
+        status: "running",
+        resultUrl: null as string | null,
+        error: null,
+      };
+      jobs.set(id, job);
+      generationPending = true;
+      releaseGeneration = () => {
+        job.status = "succeeded";
+        job.resultUrl = "/desktop/project.svg";
+        generationPending = false;
+      };
+      return send(job, 202);
+    }
+    return send(jobs.get(jobRoute[2] ?? "") ?? {}, 200);
   }
   if (url.pathname === "/api/generate") {
     generationPending = true;

@@ -81,7 +81,11 @@ export function sameParentSelection(nodes: Node[], selectedIds: string[]): strin
  * 组框 = 选区包围盒四周外扩 GROUP_PADDING，顶部再多留一条标题栏的高度。
  * 返回的数组里编组排在成员前面 —— React Flow 要求父节点先于子节点出现。
  */
-export function groupNodes(nodes: Node[], selectedIds: string[]): Node[] {
+export function groupNodes(
+  nodes: Node[],
+  selectedIds: string[],
+  groupId: string = crypto.randomUUID(),
+): Node[] {
   if (!canGroup(nodes, selectedIds)) return nodes;
 
   const ids = new Set(selectedIds);
@@ -99,7 +103,7 @@ export function groupNodes(nodes: Node[], selectedIds: string[]): Node[] {
   };
 
   const group: Node = {
-    id: crypto.randomUUID(),
+    id: groupId,
     type: GROUP_NODE_TYPE,
     position: origin,
     data: { label: DEFAULT_GROUP_LABEL },

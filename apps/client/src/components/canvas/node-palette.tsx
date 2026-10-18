@@ -5,7 +5,6 @@ import {
   Hand,
   MousePointer2,
   Redo2,
-  Table2,
   Type,
   Undo2,
   Upload,
@@ -37,7 +36,6 @@ type NodePaletteProps = {
   onAddImageGen: () => void;
   onAddVideoGen: () => void;
   onAddText: () => void;
-  onAddStoryboard: () => void;
   onPickFiles: (files: File[]) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -51,7 +49,6 @@ export function NodePalette({
   onAddImageGen,
   onAddVideoGen,
   onAddText,
-  onAddStoryboard,
   onPickFiles,
   canUndo,
   canRedo,
@@ -105,23 +102,6 @@ export function NodePalette({
         <TooltipContent side="top">
           <p className="font-medium">文本</p>
           <p className="opacity-75">提示词片段，连给生成节点按位置插入</p>
-        </TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onAddStoryboard}
-            aria-label="添加双人播客分镜表节点"
-          >
-            <Table2 />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          <p className="font-medium">双人播客分镜表</p>
-          <p className="opacity-75">逐镜填镜头 / 时长 / 台词 / 表演与提示词</p>
         </TooltipContent>
       </Tooltip>
 

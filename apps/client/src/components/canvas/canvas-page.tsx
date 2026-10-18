@@ -7,17 +7,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { useDesktopWorkspace } from "@/lib/desktop";
+import { useCanvasActive, useDesktopWorkspace } from "@/lib/desktop";
 import { fromPersistedGraph } from "@/lib/graph";
 import { CanvasEditor } from "./canvas-editor";
 
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; project: Project; graph: ProjectGraph };
+  | { status: "ready"; project: Project; graph: ProjectGraph; version: number };
 
 export function CanvasPage({ projectId }: { projectId: number }) {
   const workspace = useDesktopWorkspace();
+  const active = useCanvasActive();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const nameWrites = useRef(new Set<Promise<void>>());
   const waitForName = useCallback(async () => {
@@ -42,7 +43,8 @@ export function CanvasPage({ projectId }: { projectId: number }) {
         if (!projectRes.ok || !graphRes.ok) throw new Error("接口返回异常");
 
         const [project, graph] = await Promise.all([projectRes.json(), graphRes.json()]);
-        if (!cancelled) setState({ status: "ready", project, graph });
+        if (!cancelled)
+          setState({ status: "ready", project, graph: graph.graph, version: graph.version });
       } catch {
         if (!cancelled) {
           setState({ status: "error", message: "加载失败，确认 server 已在 3001 端口启动" });
@@ -60,7 +62,7 @@ export function CanvasPage({ projectId }: { projectId: number }) {
   // 加载中 / 加载失败时保持 page.tsx 里那份静态标题不动。
   // 桌面端的窗口标题也跟着这里变。
   const projectName = state.status === "ready" ? state.project.name : null;
-  const titleActive = !workspace || workspace.activeId === projectId;
+  const titleActive = active && (!workspace || workspace.activeId === projectId);
   useEffect(() => {
     if (projectName === null || !titleActive) return;
     document.title = `画布 · ${projectName}`;
@@ -125,6 +127,7 @@ export function CanvasPage({ projectId }: { projectId: number }) {
         initialEdges={initial.edges}
         initialViewport={state.graph.viewport}
         initialGraph={state.graph}
+        initialVersion={state.version}
         onRename={handleRename}
         waitForMetadata={waitForName}
       />

@@ -88,7 +88,7 @@ export function alignNodes(nodes: Node[], selectedIds: string[], mode: AlignMode
  * 也不会互相压住；同一行的节点按顶部对齐。
  * 整体锚定在原选区的左上角，整理完不会跑到视口外面去。
  */
-export function arrangeNodes(nodes: Node[], selectedIds: string[]): Node[] {
+export function arrangeNodes(nodes: Node[], selectedIds: string[], gap = LAYOUT_GAP): Node[] {
   const ids = new Set(selectedIds);
   const boxes = boxesOf(nodes, ids);
   if (boxes.length < 2) return nodes;
@@ -121,10 +121,8 @@ export function arrangeNodes(nodes: Node[], selectedIds: string[]): Node[] {
   sorted.forEach((box, index) => {
     const col = index % columns;
     const row = Math.floor(index / columns);
-    const x =
-      originX + columnWidths.slice(0, col).reduce((sum, width) => sum + width + LAYOUT_GAP, 0);
-    const y =
-      originY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + LAYOUT_GAP, 0);
+    const x = originX + columnWidths.slice(0, col).reduce((sum, width) => sum + width + gap, 0);
+    const y = originY + rowHeights.slice(0, row).reduce((sum, height) => sum + height + gap, 0);
     moved.set(box.id, { x, y });
   });
 

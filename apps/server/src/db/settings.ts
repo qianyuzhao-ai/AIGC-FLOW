@@ -8,9 +8,6 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   audioUploadUrl: "audio_upload_url",
   generateUrl: "generate_url",
   reqFrom: "req_from",
-  llmBaseUrl: "llm_base_url",
-  llmApiKey: "llm_api_key",
-  llmModel: "llm_model",
 };
 
 /** 和 schema.ts 的 isoNow 同格式（带 Z 的 ISO 8601 UTC） */
@@ -42,25 +39,10 @@ export function getAppSettings(): AppSettings {
       stored.get(SETTING_KEYS.generateUrl) ??
       (legacyGenerate ? `${legacyGenerate}/aigc` : DEFAULT_APP_SETTINGS.generateUrl),
     reqFrom: stored.get(SETTING_KEYS.reqFrom) ?? DEFAULT_APP_SETTINGS.reqFrom,
-    llmBaseUrl: stored.get(SETTING_KEYS.llmBaseUrl) ?? DEFAULT_APP_SETTINGS.llmBaseUrl,
-    llmApiKey: stored.get(SETTING_KEYS.llmApiKey) ?? DEFAULT_APP_SETTINGS.llmApiKey,
-    llmModel: stored.get(SETTING_KEYS.llmModel) ?? DEFAULT_APP_SETTINGS.llmModel,
   };
 }
 
-/**
- * 落盘。写之前先兑现 `llmApiKey` 的契约（见 shared 的 `appSettingsSchema`）：
- * 空串 = 保持已存的 key 不动 —— 面板拿到的永远是掩码，用户不重填就发不出真 key，
- * 直接照抄会把 key 冲成空。清空 key 的唯一出口是把 base 地址一并清掉：
- * 没有地址的 key 已经没有意义，留着反而是白放一份凭据。
- */
-export function setAppSettings(input: AppSettings): void {
-  const stored = getAppSettings();
-  const value: AppSettings = {
-    ...input,
-    llmApiKey: input.llmBaseUrl ? input.llmApiKey || stored.llmApiKey : "",
-  };
-
+export function setAppSettings(value: AppSettings): void {
   for (const field of Object.keys(SETTING_KEYS) as (keyof AppSettings)[]) {
     db.insert(settings)
       .values({ key: SETTING_KEYS[field], value: value[field], updatedAt: nowIso() })

@@ -2,9 +2,12 @@
 
 import { NODE_MARK_LABEL, type NodeMark, type Project } from "@aigc-flow/shared";
 import { ChevronLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
+import { useReducedMotion } from "motion/react";
 import Link from "next/link";
+import { useState } from "react";
 import { ProjectName } from "@/components/canvas/project-name";
 import { SaveIndicator } from "@/components/canvas/save-indicator";
+import { PiChat, piChatTransition } from "@/components/pi-chat";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { StatsDialog } from "@/components/stats-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -146,8 +149,19 @@ export function CanvasInfoGroup({
 }
 
 export function CanvasActionGroup({ projectId }: { projectId: number }) {
+  const [chatOpen, setChatOpen] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const transition = piChatTransition(chatOpen, reducedMotion);
   return (
-    <div className={GROUP}>
+    <div
+      className={cn(GROUP, "transition-transform motion-reduce:transition-none")}
+      style={{
+        transform: chatOpen ? "translateX(calc(-1 * var(--pi-chat-width)))" : "translateX(0)",
+        transitionDuration: `${transition.duration}s`,
+        transitionTimingFunction: `cubic-bezier(${transition.ease.join(",")})`,
+      }}
+    >
+      <PiChat projectId={projectId} open={chatOpen} onOpenChange={setChatOpen} />
       <StatsDialog projectId={projectId} />
       <ThemeToggle />
       <SettingsDialog />
