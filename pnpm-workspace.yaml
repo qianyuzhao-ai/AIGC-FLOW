@@ -19,3 +19,6 @@ minimumReleaseAgeExclude:
   - tsx@4.23.13
   - zod@4.5.4
   - electron@44.2.0
+
+patchedDependencies:
+  app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
