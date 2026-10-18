@@ -12,6 +12,7 @@
     "dist:win": "pnpm run build:web && pnpm run build && electron-builder --win",
     "dist:all": "pnpm run build:web && pnpm run build && electron-builder --mac --arm64 --x64 && electron-builder --win",
     "test": "tsup --config test.config.ts && node --test dist/tests/unit/*.cjs",
+    "test:package": "node build/verify-package.cjs",
     "test:smoke": "tsup --config test.config.ts && electron dist/tests/smoke.cjs"
   },
   "dependencies": {
