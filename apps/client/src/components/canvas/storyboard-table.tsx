@@ -27,8 +27,6 @@ import {
   Maximize2,
   MoreHorizontal,
   Plus,
-  RefreshCw,
-  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -52,7 +50,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * 每列多宽。列的顺序、中文名和形态（text / role / seconds / derived）都在
- * shared 的 STORYBOARD_COLUMNS 里 —— 那份是契约，喂给 LLM 时也用同一份；
+ * shared 的 STORYBOARD_COLUMNS 里；
  * 这里只管排版。
  *
  * 宽度用 minmax：节点可以拉窄，窄到 min 之后整张表横向滚动，
@@ -87,10 +85,6 @@ type StoryboardTableProps = {
    * 弹层里的那份不传，免得套娃（同 prompt-editor 的做法）。
    */
   onExpand?: () => void;
-  /** 生成表演 Prompt。不传行 id 就是整表批量，传了就是只重生那一行 */
-  onGenerate: (rowId?: string) => void;
-  /** 正在生成的目标："all" 是整表，字符串是某一行的 id，null 是空闲 */
-  generating: "all" | string | null;
 };
 
 /**
@@ -102,11 +96,8 @@ export function StoryboardTable({
   onRowsChange,
   large = false,
   onExpand,
-  onGenerate,
-  generating,
 }: StoryboardTableProps) {
   const atMax = rows.length >= STORYBOARD_MAX_ROWS;
-  const busy = generating !== null;
 
   /**
    * 从 Excel / Google Sheets 粘进来的一整块内容：以被粘的那个格子为左上角铺开。
@@ -174,8 +165,6 @@ export function StoryboardTable({
               rows={rows}
               onRowsChange={onRowsChange}
               onPasteBlock={pasteBlock}
-              onGenerate={onGenerate}
-              generating={generating}
             />
           ))}
         </div>
@@ -186,22 +175,11 @@ export function StoryboardTable({
           variant="ghost"
           size="sm"
           className="nodrag h-7 gap-1 px-2 text-xs"
-          disabled={atMax || busy}
+          disabled={atMax}
           onClick={() => onRowsChange(withRowInserted(rows, rows.length))}
         >
           <Plus className="size-3.5" />
           添加一行
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="nodrag h-7 gap-1 px-2 text-xs"
-          disabled={busy || rows.length === 0}
-          onClick={() => onGenerate()}
-        >
-          <Sparkles className={cn("size-3.5", generating === "all" && "animate-pulse")} />
-          {generating === "all" ? "生成中…" : "生成表演 Prompt"}
         </Button>
 
         <span className="text-[11px] text-muted-foreground tabular-nums">
@@ -258,8 +236,6 @@ function Row({
   large,
   onRowsChange,
   onPasteBlock,
-  onGenerate,
-  generating,
 }: {
   row: StoryboardRow;
   rows: StoryboardRow[];
@@ -268,11 +244,7 @@ function Row({
   large: boolean;
   onRowsChange: (rows: StoryboardRow[]) => void;
   onPasteBlock: (anchorIndex: number, field: StoryboardField, block: string[][]) => void;
-  onGenerate: (rowId?: string) => void;
-  generating: "all" | string | null;
 }) {
-  const busy = generating === "all" || generating === row.id;
-
   return (
     <>
       {STORYBOARD_COLUMNS.map((column) => (
@@ -281,7 +253,6 @@ function Row({
           column={column}
           row={row}
           large={large}
-          busy={busy}
           onCommit={(value) =>
             onRowsChange(withCell(rows, row.id, column.key as StoryboardField, value))
           }
@@ -302,11 +273,6 @@ function Row({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem disabled={generating !== null} onSelect={() => onGenerate(row.id)}>
-              <RefreshCw />
-              重新生成表演 Prompt
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               disabled={index === 0}
               onSelect={() => onRowsChange(withRowMoved(rows, row.id, -1))}
@@ -345,14 +311,12 @@ function Cell({
   column,
   row,
   large,
-  busy,
   onCommit,
   onPasteBlock,
 }: {
   column: StoryboardColumn;
   row: StoryboardRow;
   large: boolean;
-  busy: boolean;
   onCommit: (value: string) => void;
   onPasteBlock: (block: string[][]) => void;
 }) {
@@ -404,7 +368,6 @@ function Cell({
       value={text}
       kind={column.kind}
       large={large}
-      busy={busy}
       onCommit={onCommit}
       onPasteBlock={onPasteBlock}
     />
@@ -420,7 +383,7 @@ function Cell({
  * 「中文」会打成 zzhzhozhonzhong中wwewen文。
  *
  * 和文本节点不同的是这里的输入框**常驻**（表格没有「双击进编辑」这一步），
- * 所以外部改动要能同步进来：撤销、粘贴、LLM 写回表演 Prompt，以及放大弹层和
+ * 所以外部改动要能同步进来：撤销、粘贴，以及放大弹层和
  * 节点里两份表格同时挂载时在另一份里改了同一格。同步只在**没聚焦**时做 ——
  * 聚焦时写回正是要避开的那件事。
  */
@@ -428,14 +391,12 @@ function StoryboardCell({
   value,
   kind,
   large,
-  busy,
   onCommit,
   onPasteBlock,
 }: {
   value: string;
   kind: StoryboardCellKind;
   large: boolean;
-  busy: boolean;
   onCommit: (value: string) => void;
   onPasteBlock: (block: string[][]) => void;
 }) {
@@ -455,7 +416,6 @@ function StoryboardCell({
 
   const shared = {
     value: draft,
-    disabled: busy,
     onChange: (event: { target: { value: string } }) => flush(event.target.value),
     onFocus: () => {
       focusedRef.current = true;

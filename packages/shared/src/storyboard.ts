@@ -35,9 +35,9 @@ export const storyboardRowSchema = z.object({
   duration: z.number().min(DURATION_MIN).max(DURATION_MAX).nullable(),
   /** 台词 */
   dialogue: z.string(),
-  /** 表演：情绪、动作、走位。人写的意图，喂给 LLM 当输入 */
+  /** 表演：情绪、动作、走位。 */
   performance: z.string(),
-  /** 表演 Prompt：LLM 按上面几列生成，生成后仍可手改 */
+  /** 表演 Prompt：手动填写的表演描述 */
   performancePrompt: z.string(),
 });
 
@@ -67,7 +67,7 @@ export type StoryboardColumn = {
 
 /**
  * 列的顺序、中文名与形态。放 shared 而不是组件里：这既是表头文案、导出表头，
- * 也是喂给 LLM 时描述输入格式要用的同一份字段清单，抄成两份迟早会对不上。
+ * 表格渲染和剪贴板导出共用同一份字段清单。
  * 列宽之类的纯排版留在组件里。
  */
 export const STORYBOARD_COLUMNS: readonly StoryboardColumn[] = [
@@ -420,66 +420,6 @@ export function normalizeCellText(kind: StoryboardCellKind, text: string): strin
   const parsed = Number.parseFloat(trimmed.replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? String(clampDuration(parsed)) : "";
 }
-
-/**
- * 请 LLM 生成表演 Prompt 的入参。
- *
- * **整表都要送过去**，哪怕只重生一行 —— 表演是有连贯性的，只看孤零零一镜
- * 生出来的东西和前后镜对不上（这也是「整表批量」比「一行一次」更该是主路径的原因）。
- * `only` 说的是「要哪几行的结果」，不是「只让模型看这几行」。
- */
-export const storyboardGenerateRequestSchema = z.object({
-  rows: z
-    .array(
-      z.object({
-        shotNumber: z.string(),
-        shot: z.string(),
-        duration: z.number().nullable(),
-        dialogue: z.string(),
-        performance: z.string(),
-      }),
-    )
-    .min(1)
-    .max(STORYBOARD_MAX_ROWS),
-  /** 要回结果的行下标。不给 = 整表 */
-  only: z.array(z.number().int().min(0)).max(STORYBOARD_MAX_ROWS).optional(),
-});
-
-export type StoryboardGenerateRequest = z.infer<typeof storyboardGenerateRequestSchema>;
-
-/** 返回按下标对齐，不靠顺序 —— 模型偶尔会少给或乱序，靠位置对会把结果串行 */
-export const storyboardGenerateResponseSchema = z.object({
-  prompts: z.array(z.object({ index: z.number().int().min(0), prompt: z.string() })),
-});
-
-export type StoryboardGenerateResponse = z.infer<typeof storyboardGenerateResponseSchema>;
-
-/**
- * 生成表演 Prompt 的系统提示词。
- *
- * **和完整 Prompt 的模板一样，这是我拟的一版，不是定稿** —— 要调语气、长度、
- * 术语只改这一处。刻意要求返回 JSON 而不是自由文本：自由文本得靠正则去猜
- * 哪段对应哪一镜，模型一换措辞就全错位。
- */
-export const PERFORMANCE_PROMPT_SYSTEM = `你是双人对话播客的分镜导演。用户会给你一张分镜表，每一镜包含：
-- shot：机位，只有「单人A」「单人B」「双人」三种
-- duration：这一镜的时长（秒）
-- dialogue：这一镜要说的台词
-- performance：人写的表演意图（可能为空）
-
-请为指定的镜次写「表演 Prompt」：一段给图生视频模型看的表演描述，只写**这个人在这一镜里怎么演**——
-表情、视线、头部与手部的细微动作、身体朝向的变化、情绪的起落。
-
-硬性要求：
-1. 只描述表演，不要写镜头运动、景别、灯光、场景、服装，那些由别处控制。
-2. 不要复述台词内容本身，写的是说这句话时的状态。
-3. 长度和 duration 匹配：时长短就一个动作，时长长可以有情绪转折。
-4. 中文，一段话，不分点，不加引号，不写「镜头」「画面」这类词。
-5. 前后镜之间要连贯：上一镜结束时的状态就是这一镜开始时的状态。
-
-只输出 JSON，不要任何解释或代码块围栏，格式为：
-{"prompts":[{"index":0,"prompt":"..."}]}
-index 用用户给的行下标，只返回被要求的那几行。`;
 
 /**
  * 把从 graph 读回来的行收成当前契约的形状。

@@ -1,6 +1,30 @@
 # AIGC-FLOW
 画布节点工作，用于调用各种模型进行影视资产创作
 
+## Pi 对话与模型配置
+
+需要 Node.js 22.19+。在画布的「设置 → Pi 模型」选择服务、填写 API Key 和模型，
+也可以添加 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容服务。
+先保存，再使用「验证已保存的模型」。这会向该模型发送一次短请求。
+
+画布工具栏的 Pi 按钮打开对话侧栏。回复支持流式显示和停止，对话历史按项目保存，
+重新打开或重启应用后可继续。当前提供基础创作对话，尚未注册画布操作工具。
+
+Pi 使用数据库所在目录下的 `pi/` 保存 `auth.json`、`models.json`、`settings.json`
+以及项目会话；不会使用用户独立安装的 Pi 配置。Web 开发时通常是
+`apps/server/data/pi/`，桌面端在应用用户数据目录的 `data/pi/`。不要提交该目录，
+也不要把配置文件中的凭据发到客户端。
+
+旧 LLM 配置与分镜表的「生成表演 Prompt」已移除。运行 `pnpm db:migrate` 会清除
+SQLite 中旧的三个 LLM 配置项，需要在 Pi 模型中重新配置。已有分镜数据、手动编辑
+和复制全表不受影响。内网素材上传和图片／视频生成仍使用原来的内网服务设置。
+
+本地模拟模型集成测试（不会调用付费服务）：
+
+```sh
+pnpm --filter @aigc-flow/server exec node --import tsx --test src/pi/pi.test.ts
+```
+
 ## 桌面项目标签页
 
 Electron 桌面端使用 48px 全高标签栏，保留原生窗口控制。点击项目首页中的卡片打开

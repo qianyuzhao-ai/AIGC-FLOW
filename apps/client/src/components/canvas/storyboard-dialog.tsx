@@ -24,16 +24,12 @@ export function StoryboardDialog({
   title,
   rows,
   onRowsChange,
-  onGenerate,
-  generating,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   rows: StoryboardRow[];
   onRowsChange: (rows: StoryboardRow[]) => void;
-  onGenerate: (rowId?: string) => void;
-  generating: "all" | string | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -48,13 +44,7 @@ export function StoryboardDialog({
         </DialogHeader>
         {/* 弹层里没有节点那样的确定高度，得自己给一个，表格才有得滚 */}
         <div className="flex h-[65vh] flex-col">
-          <StoryboardTable
-            rows={rows}
-            onRowsChange={onRowsChange}
-            onGenerate={onGenerate}
-            generating={generating}
-            large
-          />
+          <StoryboardTable rows={rows} onRowsChange={onRowsChange} large />
         </div>
       </DialogContent>
     </Dialog>

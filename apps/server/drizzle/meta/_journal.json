@@ -36,6 +36,13 @@
       "when": 1788335137546,
       "tag": "0004_pretty_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792309030155,
+      "tag": "0005_remove-legacy-llm",
+      "breakpoints": true
     }
   ]
 }

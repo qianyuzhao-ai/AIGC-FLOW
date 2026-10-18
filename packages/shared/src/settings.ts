@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { llmBaseUrlSchema } from "./llm";
 
 /**
  * 三个内网接口的完整地址没有默认值：内网地址不进仓库，
@@ -23,16 +22,6 @@ export const appSettingsSchema = z.object({
   generateUrl: endpointSchema,
   /** 内网生产接口要求的请求来源标识（如 v_zhangsan）。上传和生成都要带 */
   reqFrom: z.string().trim().max(100),
-  /** OpenAI 协议兼容服务的 base 地址（填到 /v1 为止）。空串 = 没配 LLM */
-  llmBaseUrl: llmBaseUrlSchema,
-  /**
-   * LLM 的 API Key。**空串在保存时的语义是「保持已存的那份不动」**，不是「清空」：
-   * 面板读到的永远是掩码（`maskApiKey`），真 key 不出服务端，用户不重填就发不出来。
-   * 要清空 key 只能把 base 地址一起清掉。
-   */
-  llmApiKey: z.string().trim().max(500),
-  /** 当前选用的模型 id。可以从 /models 拉列表里选，也可以手填 */
-  llmModel: z.string().trim().max(200),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -42,7 +31,4 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   audioUploadUrl: DEFAULT_AUDIO_UPLOAD_URL,
   generateUrl: DEFAULT_GENERATE_URL,
   reqFrom: "",
-  llmBaseUrl: "",
-  llmApiKey: "",
-  llmModel: "",
 };

@@ -12,6 +12,8 @@ allowBuilds:
   electron: true
   # NSIS 路线用不到 Squirrel.Windows，它的安装脚本不必跑
   electron-winstaller: false
+  "@google/genai": false
+  protobufjs: false
 
 minimumReleaseAgeExclude:
   - tsx@4.23.13

@@ -5,10 +5,9 @@ import { corsOrigins } from "./env";
 import { generateRoute } from "./routes/generate";
 import { generationsRoute } from "./routes/generations";
 import { healthRoute } from "./routes/health";
-import { llmRoute } from "./routes/llm";
+import { piRoute } from "./routes/pi";
 import { projectsRoute } from "./routes/projects";
 import { settingsRoute } from "./routes/settings";
-import { storyboardRoute } from "./routes/storyboard";
 import { uploadsRoute } from "./routes/uploads";
 
 /**
@@ -21,11 +20,10 @@ const app = new Hono()
   .route("/api/health", healthRoute)
   .route("/api/projects", projectsRoute)
   .route("/api/settings", settingsRoute)
+  .route("/api/pi", piRoute)
   .route("/api/uploads", uploadsRoute)
   .route("/api/generate", generateRoute)
-  .route("/api/generations", generationsRoute)
-  .route("/api/llm", llmRoute)
-  .route("/api/storyboard", storyboardRoute);
+  .route("/api/generations", generationsRoute);
 
 app.onError((err, c) => {
   console.error("[server error]", err);
