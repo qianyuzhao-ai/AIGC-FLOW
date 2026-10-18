@@ -1,4 +1,9 @@
-import { type PiChatEvent, piConnectionSchema, piPromptSchema } from "@aigc-flow/shared";
+import {
+  type PiChatEvent,
+  piConnectionSchema,
+  piModelsRequestSchema,
+  piPromptSchema,
+} from "@aigc-flow/shared";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -7,6 +12,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { projects } from "../db/schema";
 import { getConfiguredModel, getPiConfiguration, savePiConfiguration } from "../pi/configuration";
+import { discoverPiModels } from "../pi/model-discovery";
 import { getPiRuntime } from "../pi/runtime";
 import { chatMessages, getProjectSession } from "../pi/sessions";
 
@@ -19,6 +25,9 @@ export const piRoute = new Hono()
   .get("/configuration", async (c) => c.json(await getPiConfiguration()))
   .put("/configuration", zValidator("json", piConnectionSchema), async (c) =>
     c.json(await savePiConfiguration(c.req.valid("json"))),
+  )
+  .post("/models", zValidator("json", piModelsRequestSchema), async (c) =>
+    c.json({ models: await discoverPiModels(c.req.valid("json"), c.req.raw.signal) }),
   )
   .post("/verify", async (c) => {
     const { models } = await getPiRuntime();

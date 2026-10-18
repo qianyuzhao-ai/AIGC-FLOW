@@ -14,7 +14,17 @@ const historySchema = z.object({ messages: z.array(piChatMessageSchema), running
 const configurationSchema = z.object({
   provider: z.string(),
   model: z.string(),
-  providers: z.array(z.object({ id: z.string(), configured: z.boolean() })),
+  providers: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      configured: z.boolean(),
+      custom: z.object({ baseUrl: z.string(), api: z.string() }).optional(),
+      models: z.array(
+        z.object({ id: z.string(), contextWindow: z.number(), maxTokens: z.number() }),
+      ),
+    }),
+  ),
 });
 async function collect<T>(source: AsyncIterable<T>): Promise<T[]> {
   const values: T[] = [];
@@ -36,7 +46,36 @@ const first = db.insert(projects).values({ name: "Pi test" }).returning().get();
 const second = db.insert(projects).values({ name: "Other project" }).returning().get();
 
 const received: { authorization?: string; body: Record<string, unknown> }[] = [];
+const modelRequests: { url: string | undefined; authorization?: string }[] = [];
 const upstream = createServer(async (request, response) => {
+  if (request.method === "GET") {
+    modelRequests.push({ url: request.url, authorization: request.headers.authorization });
+    if (request.url === "/unavailable/models") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    if (request.url === "/redirect/models") {
+      response.writeHead(302, { Location: "/v1/models" });
+      response.end();
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        data:
+          request.url === "/empty/models"
+            ? []
+            : [
+                { id: "test-model", name: "测试模型" },
+                { id: "vendor/chat-model", name: "跨服务模型" },
+                { id: "test-model" },
+                { id: "" },
+              ],
+      }),
+    );
+    return;
+  }
   let input = "";
   for await (const part of request) input += part.toString();
   const body = JSON.parse(input);
@@ -101,6 +140,7 @@ test("Pi configuration and project conversation", async (t) => {
     apiKey: "pi-test-only-key",
     clearApiKey: false,
     custom: {
+      name: "测试聚合服务",
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
       api: "openai-completions",
       contextWindow: 32768,
@@ -132,14 +172,26 @@ test("Pi configuration and project conversation", async (t) => {
   await t.test("saves a Pi provider without requiring internal service settings", async () => {
     const response = await jsonRequest("/api/pi/configuration", connection, "PUT");
     assert.equal(response.status, 200, await response.clone().text());
-    const view = configurationSchema.parse(await response.json());
+    const body = await response.json();
+    const view = configurationSchema.parse(body);
     assert.equal(view.provider, "custom-test");
     assert.equal(view.model, "test-model");
+    const provider = view.providers.find((item) => item.id === "custom-test");
+    assert.equal(provider?.name, "测试聚合服务");
+    assert.deepEqual(provider?.custom, {
+      baseUrl: connection.custom.baseUrl,
+      api: "openai-completions",
+    });
+    assert.deepEqual(provider?.models[0], {
+      id: "test-model",
+      contextWindow: 32768,
+      maxTokens: 1024,
+    });
     assert.equal(
       view.providers.find((provider) => provider.id === "custom-test")?.configured,
       true,
     );
-    assert.equal(JSON.stringify(view).includes(connection.apiKey), false);
+    assert.equal(JSON.stringify(body).includes(connection.apiKey), false);
     const { sdk } = await getPiRuntime();
     const reopened = await sdk.ModelRuntime.create({
       authPath: join(directory, "pi/auth.json"),
@@ -147,6 +199,83 @@ test("Pi configuration and project conversation", async (t) => {
     });
     assert.equal(reopened.hasConfiguredAuth("custom-test"), true);
   });
+  await t.test(
+    "discovers aggregate models with an unsaved key and preserves exact model IDs",
+    async () => {
+      const response = await jsonRequest("/api/pi/models", {
+        provider: "custom-unsaved",
+        baseUrl: `${connection.custom.baseUrl}/`,
+        apiKey: "unsaved-test-key",
+      });
+      assert.equal(response.status, 200, await response.clone().text());
+      assert.deepEqual(await response.json(), {
+        models: [
+          { id: "test-model", name: "测试模型" },
+          { id: "vendor/chat-model", name: "跨服务模型" },
+        ],
+      });
+      assert.deepEqual(modelRequests.at(-1), {
+        url: "/v1/models",
+        authorization: "Bearer unsaved-test-key",
+      });
+      assert.equal((await getPiRuntime()).models.getProvider("custom-unsaved"), undefined);
+    },
+  );
+  await t.test("reuses only the saved key bound to the requested aggregate endpoint", async () => {
+    const response = await jsonRequest("/api/pi/models", {
+      provider: "custom-test",
+      baseUrl: connection.custom.baseUrl,
+      apiKey: "",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(modelRequests.at(-1)?.authorization, "Bearer pi-test-only-key");
+    const count = modelRequests.length;
+    const changedUrl = connection.custom.baseUrl.replace("/v1", "/other/v1");
+    const blocked = await jsonRequest("/api/pi/models", {
+      provider: "custom-test",
+      baseUrl: changedUrl,
+      apiKey: "",
+    });
+    assert.equal(blocked.status, 400);
+    assert.equal(modelRequests.length, count);
+    const explicitKey = await jsonRequest("/api/pi/models", {
+      provider: "custom-test",
+      baseUrl: changedUrl,
+      apiKey: "other-test-key",
+    });
+    assert.equal(explicitKey.status, 200);
+    assert.deepEqual(modelRequests.at(-1), {
+      url: "/other/v1/models",
+      authorization: "Bearer other-test-key",
+    });
+  });
+  await t.test(
+    "allows manual model entry when discovery is unavailable and never follows redirects",
+    async () => {
+      for (const path of ["unavailable", "empty", "redirect"]) {
+        const count = modelRequests.length;
+        const response = await jsonRequest("/api/pi/models", {
+          provider: "custom-unsaved",
+          baseUrl: connection.custom.baseUrl.replace("v1", path),
+          apiKey: "test-only",
+        });
+        assert.equal(response.status, 400);
+        assert.equal(modelRequests.length, count + 1);
+      }
+      const saved = await jsonRequest(
+        "/api/pi/configuration",
+        {
+          ...connection,
+          model: "manual-model-id",
+          apiKey: "",
+        },
+        "PUT",
+      );
+      assert.equal(saved.status, 200);
+      assert.ok((await getPiRuntime()).models.getModel("custom-test", "manual-model-id"));
+      await jsonRequest("/api/pi/configuration", connection, "PUT");
+    },
+  );
   await t.test("rejects reusing a key at a new endpoint and command-valued keys", async () => {
     const response = await jsonRequest(
       "/api/pi/configuration",

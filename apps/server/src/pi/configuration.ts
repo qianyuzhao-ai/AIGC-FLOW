@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
-import type { PiConfiguration, PiConnection } from "@aigc-flow/shared";
+import {
+  type PiConfiguration,
+  type PiConnection,
+  type PiModelsRequest,
+  piCustomEndpointSchema,
+} from "@aigc-flow/shared";
 import { z } from "zod";
 import { getPiRuntime, modelsPath } from "./runtime";
 
@@ -21,17 +26,27 @@ async function readModelFile() {
 
 export async function getPiConfiguration(): Promise<PiConfiguration> {
   const { models, settings } = await getPiRuntime();
+  const config = await readModelFile();
   return {
     provider: settings.getDefaultProvider() ?? "",
     model: settings.getDefaultModel() ?? "",
     providers: models
       .getProviders()
-      .map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        configured: models.hasConfiguredAuth(provider.id),
-        models: models.getModels(provider.id).map(({ id, name }) => ({ id, name })),
-      }))
+      .map((provider) => {
+        const custom = piCustomEndpointSchema.safeParse(config.providers[provider.id]);
+        return {
+          id: provider.id,
+          name: provider.name,
+          configured: models.hasConfiguredAuth(provider.id),
+          ...(provider.id.startsWith("custom-") && custom.success ? { custom: custom.data } : {}),
+          models: models.getModels(provider.id).map(({ id, name, contextWindow, maxTokens }) => ({
+            id,
+            name,
+            contextWindow,
+            maxTokens,
+          })),
+        };
+      })
       .filter((provider) => provider.models.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
@@ -46,7 +61,7 @@ async function saveConnection(input: PiConnection) {
     const config = await readModelFile();
     const previous = config.providers[input.provider];
     if (
-      previous?.baseUrl !== input.custom.baseUrl &&
+      piCustomEndpointSchema.safeParse(previous).data?.baseUrl !== input.custom.baseUrl &&
       models.hasConfiguredAuth(input.provider) &&
       !input.apiKey &&
       !input.clearApiKey
@@ -57,11 +72,17 @@ async function saveConnection(input: PiConnection) {
     const existingModels = z.array(z.looseObject({ id: z.string() })).parse(previous?.models ?? []);
     config.providers[input.provider] = {
       ...previous,
+      name: input.custom.name ?? previous?.name ?? input.provider,
       baseUrl,
       api,
       models: [
         ...existingModels.filter((model) => model.id !== input.model),
-        { id: input.model, contextWindow, maxTokens },
+        {
+          ...existingModels.find((model) => model.id === input.model),
+          id: input.model,
+          contextWindow,
+          maxTokens,
+        },
       ],
     };
     const temporaryPath = `${modelsPath}.${randomUUID()}.tmp`;
@@ -101,9 +122,28 @@ async function saveConnection(input: PiConnection) {
 let saving: Promise<unknown> = Promise.resolve();
 
 export function savePiConfiguration(input: PiConnection) {
-  const next = saving.then(() => saveConnection(input));
+  return serializeConfiguration(() => saveConnection(input));
+}
+
+function serializeConfiguration<T>(operation: () => Promise<T>): Promise<T> {
+  const next = saving.then(operation);
   saving = next.catch(() => {});
   return next;
+}
+
+export function resolveModelsApiKey(input: PiModelsRequest, signal: AbortSignal) {
+  return serializeConfiguration(async () => {
+    if (input.apiKey) return input.apiKey;
+    if (input.clearApiKey) return undefined;
+    const { models } = await getPiRuntime();
+    if (!models.hasConfiguredAuth(input.provider)) return undefined;
+    const config = await readModelFile();
+    const stored = piCustomEndpointSchema.safeParse(config.providers[input.provider]);
+    if (!stored.success || stored.data.baseUrl !== input.baseUrl) {
+      throw new Error("读取新地址的模型列表时，请填写该地址的 Key，不能沿用其他地址的凭据");
+    }
+    return (await models.getAuth(input.provider, { signal }))?.auth.apiKey;
+  });
 }
 
 export async function getConfiguredModel() {
