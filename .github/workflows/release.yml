@@ -54,6 +54,9 @@ jobs:
           # 没有证书：关掉钥匙串里的证书自动发现，mac 侧走配置里的 ad-hoc（identity: "-"）
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
+      - name: Verify packaged runtime
+        run: pnpm --filter @aigc-flow/desktop run test:package
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.os }}

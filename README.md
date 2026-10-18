@@ -103,3 +103,7 @@ Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实
 
 当前工作流只上传 Actions 构建产物，不会自动创建 GitHub Release；合并 `main` 本身也不会
 触发打包。只有版本标签或手动运行工作流才触发构建。
+
+工作流在上传前使用打包后的 Electron 检查 SQLite 原生模块和 Pi SDK。检查会将应用归档
+复制到临时目录，防止仓库依赖掩盖漏包问题；不会访问用户数据库或调用模型。
+本地打包后可运行 `pnpm --filter @aigc-flow/desktop test:package`，验证当前主机架构的产物。
