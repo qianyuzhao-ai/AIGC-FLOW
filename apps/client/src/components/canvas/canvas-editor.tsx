@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  createStoryboardNodeData,
   DEFAULT_IMAGE_GEN_DATA,
   DEFAULT_TEXT_NODE_DATA,
   DEFAULT_VIDEO_GEN_DATA,
@@ -12,9 +11,6 @@ import {
   type NodeMark,
   type Project,
   type ProjectGraph,
-  STORYBOARD_NODE_HEIGHT,
-  STORYBOARD_NODE_TYPE,
-  STORYBOARD_NODE_WIDTH,
   syncPromptTokens,
   TEXT_NODE_HEIGHT,
   TEXT_NODE_TYPE,
@@ -85,7 +81,6 @@ import { MediaNode } from "./media-node";
 import { type CanvasMode, NodePalette } from "./node-palette";
 import { NodePickerMenu, type NodePickerRequest, type PickerNodeType } from "./node-picker-menu";
 import { SelectionToolbar } from "./selection-toolbar";
-import { StoryboardNode } from "./storyboard-node";
 import { TextNode } from "./text-node";
 import { VideoGenNode } from "./video-gen-node";
 import "@xyflow/react/dist/style.css";
@@ -99,7 +94,6 @@ const PASTE_OFFSET = 40;
  */
 const INITIAL_SIZES: Record<string, { width: number; height: number }> = {
   [TEXT_NODE_TYPE]: { width: TEXT_NODE_WIDTH, height: TEXT_NODE_HEIGHT },
-  [STORYBOARD_NODE_TYPE]: { width: STORYBOARD_NODE_WIDTH, height: STORYBOARD_NODE_HEIGHT },
 };
 
 /** 组一个新节点 */
@@ -159,7 +153,6 @@ const NODE_TYPES = {
   [IMAGE_GEN_NODE_TYPE]: memo(ImageGenNode),
   [VIDEO_GEN_NODE_TYPE]: memo(VideoGenNode),
   [TEXT_NODE_TYPE]: memo(TextNode),
-  [STORYBOARD_NODE_TYPE]: memo(StoryboardNode),
 };
 
 type CanvasEditorProps = {
@@ -326,7 +319,7 @@ export function CanvasEditor({
     (type: string, defaults: Record<string, unknown>, position?: { x: number; y: number }) => {
       const center = viewportCenter();
 
-      // 落点让节点自身居中。尺寸已知的（文本 / 分镜表）按自己的宽高算，
+      // 落点让节点自身居中。文本按自己的宽高算，
       // 其余是内容自适应的生成节点，量不到，用它们的常见尺寸估一个
       const size = INITIAL_SIZES[type] ?? { width: 534, height: 480 };
       const node = buildCanvasNode(
@@ -354,18 +347,6 @@ export function CanvasEditor({
   );
   const handleAddText = useCallback(
     () => addGenNode(TEXT_NODE_TYPE, DEFAULT_TEXT_NODE_DATA as unknown as Record<string, unknown>),
-    [addGenNode],
-  );
-  /**
-   * 分镜表的初始 data 每次现造。**不能像上面几个那样用模块级常量** ——
-   * buildCanvasNode 只做浅拷贝，常量的话所有分镜表节点会共用同一个 rows 数组。
-   */
-  const handleAddStoryboard = useCallback(
-    () =>
-      addGenNode(
-        STORYBOARD_NODE_TYPE,
-        createStoryboardNodeData() as unknown as Record<string, unknown>,
-      ),
     [addGenNode],
   );
 
@@ -999,7 +980,6 @@ export function CanvasEditor({
                 onAddImageGen={handleAddImageGen}
                 onAddVideoGen={handleAddVideoGen}
                 onAddText={handleAddText}
-                onAddStoryboard={handleAddStoryboard}
                 onPickFiles={handlePickFiles}
                 canUndo={history.canUndo}
                 canRedo={history.canRedo}
