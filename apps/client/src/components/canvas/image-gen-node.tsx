@@ -29,6 +29,7 @@ import { ChevronDown, CircleAlert, ImageIcon, Loader2, Plus, WandSparkles } from
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useProjectAgent } from "@/components/agent-workspace";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,8 +40,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCanvasActions } from "@/hooks/use-canvas-actions";
-import { api } from "@/lib/api";
-import { beginDesktopTask } from "@/lib/desktop-tasks";
 import { downloadItemOf } from "@/lib/download";
 import { CANVAS_WIDTH, resizedImageUrl, THUMB_WIDTH } from "@/lib/media-url";
 import { nodeMarkOf } from "@/lib/node-mark";
@@ -80,6 +79,7 @@ export function ImageGenNode({ id, data, selected }: NodeProps) {
   const { updateNodeData } = useReactFlow();
   // 配置菜单只在「单击选中」时展开；框选（批量选中）不展开
   const { activeNodeId, dropTargetId, setNodeMark, duplicateNode, projectId } = useCanvasActions();
+  const agent = useProjectAgent(projectId);
   const showMenu = Boolean(selected) && activeNodeId === id;
   // 右侧功能面板（下载 / 全屏）和下方菜单同时出现，且只在已经出结果时才有东西可操作
   const actionItem = showMenu ? downloadItemOf({ id, type: IMAGE_GEN_NODE_TYPE, data }) : null;
@@ -93,7 +93,7 @@ export function ImageGenNode({ id, data, selected }: NodeProps) {
   const connections = useNodeConnections({ handleType: "target" });
   const sources = useNodesData(connections.map((connection) => connection.source));
   // 图像模型只吃图，视频 / 音频的上限给 0（连线约束本来也不让它们连进来）
-  const { texts, refs, resolvedPrompt, urls } = usePromptTokens(id, gen.prompt, sources, {
+  const { texts, refs, resolvedPrompt } = usePromptTokens(id, gen.prompt, sources, {
     image: MAX_REFERENCE_IMAGES,
     video: 0,
     audio: 0,
@@ -114,47 +114,10 @@ export function ImageGenNode({ id, data, selected }: NodeProps) {
    */
   async function handleGenerate() {
     if (generating) return;
-    // 清掉上一张的尺寸：新图加载出来之前，信息条不该还挂着旧数字。
-    // 标记跟结果走：采用 / 废弃是给上一个结果打的，一起清掉
-    updateNodeData(id, {
-      status: "generating",
-      error: undefined,
-      naturalWidth: undefined,
-      naturalHeight: undefined,
-      mark: undefined,
-    });
-
-    const finish = beginDesktopTask(projectId);
     try {
-      const res = await api.api.generate.$post({
-        json: {
-          projectId,
-          model: gen.model,
-          prompt: resolvedPrompt,
-          // prompt 里 @ 引用的占位符序号对应这个列表的下标，两者出自同一个 hook
-          imageList: urls.image,
-          quality: gen.quality,
-          sizePreset: gen.sizePreset,
-          aspectRatio: gen.aspectRatio,
-          imageSize: gen.imageSize,
-        },
-      });
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { message?: string } | null;
-        const message = body?.message ?? `生成失败（${res.status}）`;
-        toast.error("图像生成失败", { description: message });
-        updateNodeData(id, { status: "error", error: message });
-        return;
-      }
-
-      const { url } = (await res.json()) as { url: string };
-      updateNodeData(id, { status: "ready", resultUrl: url, error: undefined });
-    } catch {
-      toast.error("图像生成失败", { description: "连不上服务，确认 server 已启动" });
-      updateNodeData(id, { status: "error", error: "连不上服务，确认 server 已启动" });
-    } finally {
-      finish();
+      await agent.generate(id);
+    } catch (error) {
+      toast.error("生成失败", { description: error instanceof Error ? error.message : "提交失败" });
     }
   }
 

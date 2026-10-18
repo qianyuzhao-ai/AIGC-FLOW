@@ -6,6 +6,7 @@ export async function* readPiStream(response: Response) {
   const decoder = new TextDecoder();
   let buffer = "";
   let complete = false;
+  let heartbeat = false;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -15,9 +16,12 @@ export async function* readPiStream(response: Response) {
       while (end >= 0) {
         const line = buffer.slice(0, end).trimEnd();
         buffer = buffer.slice(end + 1);
-        if (line.startsWith("data: ")) {
+        if (line.startsWith("event:")) heartbeat = line.trim() === "event: heartbeat";
+        if (line === "") heartbeat = false;
+        if (line.startsWith("data: ") && !heartbeat) {
           const event = piChatEventSchema.parse(JSON.parse(line.slice(6)));
           if (event.type === "done" || event.type === "error") complete = true;
+          if (event.type === "state" && event.run?.status !== "running") complete = true;
           yield event;
         }
         end = buffer.indexOf("\n");

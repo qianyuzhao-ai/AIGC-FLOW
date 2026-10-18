@@ -20,4 +20,6 @@ export type WorkspaceActions = {
 };
 export const WorkspaceContext = createContext<WorkspaceActions | null>(null);
 export const CanvasPortalContext = createContext<HTMLElement | undefined>(undefined);
+export const CanvasActivityContext = createContext(true);
+export const useCanvasActive = () => useContext(CanvasActivityContext);
 export const useDesktopWorkspace = () => useContext(WorkspaceContext);

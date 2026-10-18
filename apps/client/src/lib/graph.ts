@@ -175,12 +175,12 @@ export function fromPersistedGraph(graph: ProjectGraph): { nodes: Node[]; edges:
   };
 }
 
-/** 「生成中」是运行时状态的节点类型，落盘一律回退成 idle */
+/** 运行状态由生成任务查询恢复，画布快照本身不维持加载动画。 */
 const GENERATING_NODE_TYPES = new Set<string>([IMAGE_GEN_NODE_TYPE, VIDEO_GEN_NODE_TYPE]);
 
 /**
  * 生成类节点的「生成中」是运行时状态，落盘一律回退成 idle ——
- * 刷新后请求已经断了，存下来只会是一个永远转圈的死节点。
+ * 刷新后由 generationJobId / generationRequestId 查询实际状态。
  */
 function persistedData(node: Node): CanvasNode["data"] {
   const data: CanvasNode["data"] = {
@@ -191,6 +191,13 @@ function persistedData(node: Node): CanvasNode["data"] {
     return { ...data, status: "idle" };
   }
   return data;
+}
+
+/** A copied node keeps its media, but never inherits ownership of another node's task. */
+export function copiedNodeData(data: Record<string, unknown>): Record<string, unknown> {
+  const { generationJobId: _job, generationRequestId: _request, ...copy } = structuredClone(data);
+  if (copy.status === "generating") copy.status = copy.resultUrl ? "ready" : "idle";
+  return copy;
 }
 
 /** 父节点排前、子节点排后。只有一层父子，不用做拓扑排序 */

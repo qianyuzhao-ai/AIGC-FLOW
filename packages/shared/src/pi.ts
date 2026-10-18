@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentCommandViewSchema, agentRunViewSchema } from "./agent";
 
 const providerIdSchema = z
   .string()
@@ -77,6 +78,13 @@ export const piChatMessageSchema = z.object({
   text: z.string(),
 });
 export const piChatEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("partial"), text: z.string() }),
+  z.object({
+    type: z.literal("state"),
+    run: agentRunViewSchema.nullable(),
+    commands: z.array(agentCommandViewSchema),
+    messages: z.array(piChatMessageSchema),
+  }),
   z.object({ type: z.literal("text"), delta: z.string() }),
   z.object({ type: z.literal("done"), messages: z.array(piChatMessageSchema) }),
   z.object({ type: z.literal("error"), message: z.string() }),

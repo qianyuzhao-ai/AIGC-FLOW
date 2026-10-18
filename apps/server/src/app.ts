@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { corsOrigins } from "./env";
 import { generateRoute } from "./routes/generate";
+import { generationJobsRoute } from "./routes/generation-jobs";
 import { generationsRoute } from "./routes/generations";
 import { healthRoute } from "./routes/health";
 import { piRoute } from "./routes/pi";
@@ -23,6 +24,7 @@ const app = new Hono()
   .route("/api/pi", piRoute)
   .route("/api/uploads", uploadsRoute)
   .route("/api/generate", generateRoute)
+  .route("/api/generation-jobs", generationJobsRoute)
   .route("/api/generations", generationsRoute);
 
 app.onError((err, c) => {

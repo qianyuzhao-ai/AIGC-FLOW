@@ -4,13 +4,22 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { piChatMessageSchema } from "@aigc-flow/shared";
+import {
+  agentRunViewSchema,
+  DEFAULT_IMAGE_GEN_DATA,
+  DEFAULT_VIDEO_GEN_DATA,
+  piChatMessageSchema,
+} from "@aigc-flow/shared";
 import Database from "better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { z } from "zod";
+import { applyCanvasTool, type CanvasState } from "../../../client/src/lib/agent/canvas-tools";
 import { readPiStream } from "../../../client/src/lib/pi-stream";
 
-const historySchema = z.object({ messages: z.array(piChatMessageSchema), running: z.boolean() });
+const historySchema = z.object({
+  messages: z.array(piChatMessageSchema),
+  run: agentRunViewSchema.nullable(),
+});
 const configurationSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -38,7 +47,7 @@ process.env.PI_OFFLINE = "1";
 
 const { app } = await import("../app");
 const { db } = await import("../db");
-const { projects } = await import("../db/schema");
+const { projects, settings } = await import("../db/schema");
 const { getPiRuntime } = await import("./runtime");
 const { getProjectSession, chatMessages } = await import("./sessions");
 migrate(db, { migrationsFolder: "./drizzle" });
@@ -47,6 +56,7 @@ const second = db.insert(projects).values({ name: "Other project" }).returning()
 
 const received: { authorization?: string; body: Record<string, unknown> }[] = [];
 const modelRequests: { url: string | undefined; authorization?: string }[] = [];
+let generated = 0;
 const upstream = createServer(async (request, response) => {
   if (request.method === "GET") {
     modelRequests.push({ url: request.url, authorization: request.headers.authorization });
@@ -80,6 +90,25 @@ const upstream = createServer(async (request, response) => {
   for await (const part of request) input += part.toString();
   const body = JSON.parse(input);
   received.push({ authorization: request.headers.authorization, body });
+  if (request.url === "/aigc") {
+    generated++;
+    response.setHeader("content-type", "application/json");
+    setTimeout(
+      () =>
+        response.end(
+          JSON.stringify({
+            result: {
+              status: "success",
+              content: [
+                `https://example.test/result-${generated}.${body.model_name === "seedance" ? "mp4" : "png"}`,
+              ],
+            },
+          }),
+        ),
+      50,
+    );
+    return;
+  }
   const content = body.messages.at(-1).content;
   const last =
     typeof content === "string"
@@ -89,6 +118,54 @@ const upstream = createServer(async (request, response) => {
     response.writeHead(401, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: { message: "mock invalid credential" } }));
     return;
+  }
+  const userIndex = body.messages.findLastIndex(
+    (message: { role: string }) => message.role === "user",
+  );
+  if (JSON.stringify(body.messages[userIndex]?.content).includes("tool-loop")) {
+    const results = body.messages
+      .slice(userIndex + 1)
+      .filter((message: { role: string }) => message.role === "tool");
+    const count = results.length;
+    if (count < 3) {
+      const name = ["get_canvas", "create_nodes", "arrange_nodes"][count];
+      const args =
+        count === 0
+          ? {}
+          : count === 1
+            ? { nodes: [1, 2, 3].map((i) => ({ kind: "image", prompt: `提示词${i}` })) }
+            : { nodeIds: JSON.parse(results.at(-1).content).data.nodeIds, layout: "horizontal" };
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({
+          id: "mock",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: body.model,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call-${count}`,
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(args) },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        })}\n\n`,
+      );
+      response.end(
+        `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+      );
+      return;
+    }
   }
   response.writeHead(200, { "content-type": "text/event-stream" });
   const chunk = (delta: Record<string, string>, finishReason: string | null = null) => {
@@ -328,20 +405,25 @@ test("Pi configuration and project conversation", async (t) => {
     );
     assert.equal(received.at(-1)?.authorization, "Bearer pi-test-only-key");
   });
+  const clientId = "test-client";
+  async function startChat(message: string) {
+    const response = await jsonRequest(chatPath, {
+      message,
+      clientId,
+      requestId: crypto.randomUUID(),
+      selectedNodeIds: [],
+    });
+    assert.equal(response.status, 202, await response.clone().text());
+    return z.object({ runId: z.string() }).parse(await response.json()).runId;
+  }
+  const eventsFor = (runId: string) =>
+    app.request(`/api/pi/projects/${first.id}/runs/${runId}/events?clientId=${clientId}`);
   await t.test("streams text, persists history, and isolates projects", async () => {
-    const response = await jsonRequest(chatPath, { message: "hello" });
-    assert.equal(response.status, 200, await response.clone().text());
-    const events = await collect(readPiStream(response));
-    assert.equal(
-      events
-        .filter((event) => event.type === "text")
-        .map((event) => event.delta)
-        .join(""),
-      "你好，Pi 已连接。",
-    );
+    const events = await collect(readPiStream(await eventsFor(await startChat("hello"))));
+    assert.ok(events.some((event) => event.type === "partial"));
     const history = historySchema.parse(await (await app.request(chatPath)).json());
     assert.deepEqual(
-      history.messages.map((message: { text: string }) => message.text),
+      history.messages.map((message) => message.text),
       ["hello", "你好，Pi 已连接。"],
     );
     const other = historySchema.parse(
@@ -349,39 +431,195 @@ test("Pi configuration and project conversation", async (t) => {
     );
     assert.deepEqual(other.messages, []);
     const session = await getProjectSession(first.id);
-    assert.deepEqual(session.getActiveToolNames(), []);
-    const file = session.sessionManager.getSessionFile();
-    assert.ok(file);
-    const { sdk } = await getPiRuntime();
-    assert.ok(
-      sdk.SessionManager.open(file)
-        .getBranch()
-        .some((entry) => entry.type === "message" && entry.message.role === "user"),
-    );
-    assert.equal(received.at(-1)?.body.tools, undefined);
+    assert.ok(session.getActiveToolNames().includes("create_nodes"));
+    assert.ok(!session.getActiveToolNames().includes("bash"));
+    assert.ok(session.sessionManager.getSessionFile());
   });
-  await t.test("rejects concurrent prompts and cancels generation", async () => {
-    const response = await jsonRequest(chatPath, { message: "slow" });
-    const iterator = readPiStream(response);
-    const initial = await iterator.next();
-    assert.equal(initial.value?.type, "text");
-    assert.equal((await jsonRequest(chatPath, { message: "duplicate" })).status, 409);
+  await t.test(
+    "Pi executes tools only after real canvas receipts and enforces project ownership",
+    async () => {
+      const runId = await startChat("tool-loop");
+      let state: CanvasState = {
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        center: { x: 500, y: 400 },
+      };
+      let revision = 1;
+      const seen = new Set<string>();
+      for await (const event of readPiStream(await eventsFor(runId))) {
+        if (event.type !== "state") continue;
+        for (const command of event.commands.filter(
+          (item) => item.status === "pending" && !seen.has(item.id),
+        )) {
+          seen.add(command.id);
+          const next = applyCanvasTool(command, state);
+          state = { ...state, ...next };
+          if (next.changed) revision++;
+          const result = {
+            success: true,
+            revision,
+            applied: next.changed,
+            saved: true,
+            data: next.data,
+          };
+          const path = `/api/pi/projects/${first.id}/runs/${runId}/commands/${command.id}/result`;
+          assert.equal((await jsonRequest(path, { clientId: "wrong-client", result })).status, 400);
+          assert.equal(
+            (
+              await jsonRequest(path.replace(`/projects/${first.id}/`, `/projects/${second.id}/`), {
+                clientId,
+                result,
+              })
+            ).status,
+            404,
+          );
+          assert.equal((await jsonRequest(path, { clientId, result })).status, 200);
+          assert.equal((await jsonRequest(path, { clientId, result })).status, 200);
+        }
+      }
+      assert.equal(seen.size, 3);
+      assert.equal(state.nodes.length, 3);
+      assert.deepEqual(
+        state.nodes.map((node) => node.position.x),
+        [233, 807, 1381],
+      );
+      assert.equal(
+        historySchema.parse(await (await app.request(chatPath)).json()).run?.status,
+        "completed",
+      );
+    },
+  );
+  await t.test("rejects concurrent prompts and cancels the specified run", async () => {
+    const runId = await startChat("slow");
+    const iterator = readPiStream(await eventsFor(runId));
+    await iterator.next();
     assert.equal(
-      (await app.request(`/api/pi/projects/${first.id}/abort`, { method: "POST" })).status,
+      (
+        await jsonRequest(chatPath, {
+          message: "duplicate",
+          clientId,
+          requestId: crypto.randomUUID(),
+        })
+      ).status,
+      400,
+    );
+    assert.equal(
+      (await app.request(`/api/pi/projects/${first.id}/runs/${runId}/cancel`, { method: "POST" }))
+        .status,
       200,
     );
     const remaining = await collect(iterator);
-    assert.ok(remaining.some((event) => event.type === "done"));
-    assert.equal(historySchema.parse(await (await app.request(chatPath)).json()).running, false);
+    assert.ok(
+      remaining.some((event) => event.type === "state" && event.run?.status === "cancelled"),
+    );
   });
-  await t.test("reports model errors and rejects unknown projects", async () => {
-    const events = await collect(readPiStream(await jsonRequest(chatPath, { message: "fail" })));
-    assert.ok(events.some((event) => event.type === "error"));
+  await t.test("reports model failures without manufacturing successful output", async () => {
+    const events = await collect(readPiStream(await eventsFor(await startChat("fail"))));
+    assert.ok(events.some((event) => event.type === "state" && event.run?.status === "failed"));
     assert.equal(
-      (await jsonRequest("/api/pi/projects/9999/messages", { message: "hello" })).status,
+      (
+        await jsonRequest("/api/pi/projects/9999/messages", {
+          message: "hello",
+          clientId,
+          requestId: crypto.randomUUID(),
+        })
+      ).status,
       404,
     );
     assert.ok(chatMessages(await getProjectSession(first.id)).length >= 4);
+  });
+  await t.test("image and video jobs are idempotent and keep real results", async () => {
+    db.insert(settings)
+      .values([
+        { key: "generate_url", value: `http://127.0.0.1:${address.port}/aigc` },
+        { key: "req_from", value: "test-only" },
+      ])
+      .run();
+    const initial = (await (await app.request(`/api/projects/${first.id}/graph`)).json()) as {
+      version: number;
+    };
+    const graph = {
+      nodes: [
+        { id: "image", type: "image-gen", position: { x: 0, y: 0 }, data: DEFAULT_IMAGE_GEN_DATA },
+        {
+          id: "video",
+          type: "video-gen",
+          position: { x: 600, y: 0 },
+          data: DEFAULT_VIDEO_GEN_DATA,
+        },
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+    assert.equal(
+      (
+        await jsonRequest(
+          `/api/projects/${first.id}/graph`,
+          { graph, expectedVersion: initial.version },
+          "PUT",
+        )
+      ).status,
+      200,
+    );
+    for (const kind of ["image", "video"] as const) {
+      const request = {
+        kind,
+        nodeId: kind,
+        requestId: `job-${kind}`,
+        input: {
+          ...(kind === "image" ? DEFAULT_IMAGE_GEN_DATA : DEFAULT_VIDEO_GEN_DATA),
+          prompt: "测试",
+          imageList: [],
+          videoList: [],
+          audioList: [],
+        },
+      };
+      const path = `/api/generation-jobs/${first.id}/jobs`;
+      const response = await jsonRequest(path, request);
+      assert.equal(response.status, 202, await response.clone().text());
+      const job = z.object({ id: z.string() }).parse(await response.json());
+      const recovered = await app.request(
+        `/api/generation-jobs/${first.id}/requests/${request.requestId}`,
+      );
+      assert.equal(
+        z.object({ job: z.object({ id: z.string() }) }).parse(await recovered.json()).job.id,
+        job.id,
+      );
+      assert.deepEqual(
+        await (
+          await app.request(`/api/generation-jobs/${second.id}/requests/${request.requestId}`)
+        ).json(),
+        { job: null },
+      );
+      const duplicate = await jsonRequest(path, request);
+      assert.equal(duplicate.status, 202);
+      assert.equal(z.object({ id: z.string() }).parse(await duplicate.json()).id, job.id);
+      let result: { status: string; resultUrl: string | null } | undefined;
+      for (let i = 0; i < 50; i++) {
+        result = z
+          .object({ status: z.string(), resultUrl: z.string().nullable() })
+          .parse(await (await app.request(`${path}/${job.id}`)).json());
+        if (result.status !== "running") break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(result?.status, "succeeded");
+      assert.match(result?.resultUrl ?? "", kind === "image" ? /png$/ : /mp4$/);
+    }
+    assert.equal(generated, 2);
+    const cancelledRun = await startChat("slow");
+    await app.request(`/api/pi/projects/${first.id}/runs/${cancelledRun}/cancel`, {
+      method: "POST",
+    });
+    const blocked = await jsonRequest(`/api/generation-jobs/${first.id}/jobs`, {
+      kind: "image",
+      nodeId: "image",
+      requestId: "after-stop",
+      runId: cancelledRun,
+      input: { ...DEFAULT_IMAGE_GEN_DATA, prompt: "must not submit", imageList: [] },
+    });
+    assert.equal(blocked.status, 400);
+    assert.equal(generated, 2);
   });
 });
 

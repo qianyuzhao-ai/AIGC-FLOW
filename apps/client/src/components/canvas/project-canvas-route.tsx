@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 import { CanvasPage } from "@/components/canvas/canvas-page";
 import { Button } from "@/components/ui/button";
+import { useWebProjects } from "@/components/web-project-host";
 
 /**
  * 画布路由的入口：项目 id 走查询参数而不是动态路由段。
@@ -14,6 +16,12 @@ import { Button } from "@/components/ui/button";
  */
 export function ProjectCanvasRoute() {
   const projectId = Number(useSearchParams().get("id"));
+  const activate = useWebProjects();
+  useEffect(() => {
+    if (!activate || !Number.isInteger(projectId) || projectId <= 0) return;
+    activate(projectId);
+    return () => activate(null);
+  }, [activate, projectId]);
 
   // 查询参数是任意字符串，非法 id 就地提示，别让它带着 NaN 往下走
   if (!Number.isInteger(projectId) || projectId <= 0) {
@@ -27,5 +35,5 @@ export function ProjectCanvasRoute() {
     );
   }
 
-  return <CanvasPage projectId={projectId} />;
+  return activate ? null : <CanvasPage projectId={projectId} />;
 }

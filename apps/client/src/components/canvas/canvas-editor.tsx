@@ -38,14 +38,17 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useTheme } from "next-themes";
-import { type DragEvent, memo, useCallback, useMemo, useRef, useState } from "react";
+import { type DragEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useProjectAgent } from "@/components/agent-workspace";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CanvasActionsProvider } from "@/hooks/use-canvas-actions";
 import { useDesktopProject } from "@/hooks/use-desktop-project";
 import { useGraphAutosave } from "@/hooks/use-graph-autosave";
 import { useCanvasShortcuts, useGraphHistory } from "@/hooks/use-graph-history";
 import { useMediaUpload } from "@/hooks/use-media-upload";
+import type { CanvasBinding } from "@/lib/agent/canvas-tools";
+import { retainGenerationResults } from "@/lib/agent/generation-results";
 import {
   fromClipboardPayload,
   offsetToCenter,
@@ -55,6 +58,7 @@ import {
 } from "@/lib/clipboard";
 import { canConnectNodes, sourceResourceOf, targetAcceptsOf } from "@/lib/connection";
 import { downloadableMedia, downloadMedia } from "@/lib/download";
+import { copiedNodeData, toPersistedGraph } from "@/lib/graph";
 import {
   canGroup as canGroupNodes,
   groupChildIds,
@@ -130,7 +134,7 @@ function duplicateCanvasNode(source: Node): Node {
       x: source.position.x + DUPLICATE_OFFSET,
       y: source.position.y + DUPLICATE_OFFSET,
     },
-    data: structuredClone(source.data),
+    data: copiedNodeData(source.data),
     ...(source.width !== undefined ? { width: source.width } : {}),
     ...(source.height !== undefined ? { height: source.height } : {}),
     ...(source.style ? { style: { ...source.style } } : {}),
@@ -164,6 +168,7 @@ type CanvasEditorProps = {
   initialEdges: Edge[];
   initialViewport: Viewport;
   initialGraph: ProjectGraph;
+  initialVersion: number;
   onRename: (name: string) => Promise<void>;
   waitForMetadata?: () => Promise<void>;
 };
@@ -174,13 +179,15 @@ export function CanvasEditor({
   initialEdges,
   initialViewport,
   initialGraph,
+  initialVersion,
   onRename,
   waitForMetadata,
 }: CanvasEditorProps) {
+  const agent = useProjectAgent(project.id);
   const [mode, setMode] = useState<CanvasMode>("select");
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { screenToFlowPosition, flowToScreenPosition, getViewport, getIntersectingNodes } =
+  const { screenToFlowPosition, flowToScreenPosition, getViewport, getIntersectingNodes, fitView } =
     useReactFlow();
   // React Flow 的节点 / 控制条 / 小地图有自己一套 CSS 变量，不吃我们的 .dark，
   // 必须显式把主题传给它的 colorMode，否则暗色下节点是白底白字，完全看不见
@@ -196,13 +203,15 @@ export function CanvasEditor({
   edgesRef.current = edges;
 
   const history = useGraphHistory({ nodes: initialNodes, edges: initialEdges });
-  const { commit: commitHistory } = history;
+  const { commit: commitHistory, replace: replaceHistory } = history;
   const { status, saveNow } = useGraphAutosave({
     projectId: project.id,
     nodes,
     edges,
     getViewport,
     initialGraph,
+    initialVersion,
+    readGraph: () => toPersistedGraph(nodesRef.current, edgesRef.current, getViewport()),
   });
   const saveProject = useCallback(async () => {
     await waitForMetadata?.();
@@ -219,10 +228,17 @@ export function CanvasEditor({
   const applySnapshot = useCallback(
     (snapshot: { nodes: Node[]; edges: Edge[] } | null) => {
       if (!snapshot) return;
-      setNodes(snapshot.nodes);
-      setEdges(snapshot.edges);
+      const restored = {
+        nodes: retainGenerationResults(snapshot.nodes, nodesRef.current, agent.getSnapshot().jobs),
+        edges: snapshot.edges,
+      };
+      nodesRef.current = restored.nodes;
+      edgesRef.current = restored.edges;
+      setNodes(restored.nodes);
+      setEdges(restored.edges);
+      replaceHistory(restored);
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, replaceHistory, agent],
   );
 
   /** 当前视口中心的画布坐标。新节点、上传的文件、跨项目粘贴都落在这儿 */
@@ -231,6 +247,43 @@ export function CanvasEditor({
     if (!rect) return { x: 0, y: 0 };
     return screenToFlowPosition({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
   }, [screenToFlowPosition]);
+
+  const agentBinding = useRef<CanvasBinding | null>(null);
+  agentBinding.current = {
+    read: () => ({
+      nodes: nodesRef.current,
+      edges: edgesRef.current,
+      viewport: getViewport(),
+      center: viewportCenter(),
+    }),
+    apply: (nextNodes, nextEdges, recordHistory) => {
+      if (recordHistory) history.replace({ nodes: nodesRef.current, edges: edgesRef.current });
+      nodesRef.current = nextNodes;
+      edgesRef.current = nextEdges;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      if (recordHistory) commitHistory({ nodes: nextNodes, edges: nextEdges });
+      else history.replace({ nodes: nextNodes, edges: nextEdges });
+    },
+    save: saveProject,
+    focus: (ids) => {
+      void fitView({ nodes: ids.map((id) => ({ id })), duration: 200 });
+    },
+  };
+  useEffect(
+    () =>
+      agent.bind({
+        read: () => {
+          if (!agentBinding.current) throw new Error("画布未挂载");
+          return agentBinding.current.read();
+        },
+        apply: (nodes, edges, recordHistory) =>
+          agentBinding.current?.apply(nodes, edges, recordHistory),
+        save: () => agentBinding.current?.save() ?? Promise.resolve(false),
+        focus: (ids) => agentBinding.current?.focus(ids),
+      }),
+    [agent],
+  );
 
   const handleConnect = useCallback(
     (connection: Connection) => {

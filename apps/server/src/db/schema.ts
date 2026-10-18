@@ -1,6 +1,6 @@
 import { EMPTY_GRAPH_JSON } from "@aigc-flow/shared";
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * 时间戳统一存 ISO 8601 UTC（带 Z）。
@@ -17,6 +17,7 @@ export const projects = sqliteTable("projects", {
   coverImage: text("cover_image"),
   /** 整张画布图（nodes / edges / viewport）的 JSON，读写都是整体覆盖 */
   graph: text("graph").notNull().default(EMPTY_GRAPH_JSON),
+  graphVersion: integer("graph_version").notNull().default(0),
   createdAt: text("created_at").notNull().default(isoNow),
   updatedAt: text("updated_at").notNull().default(isoNow),
 });
@@ -64,3 +65,66 @@ export const generations = sqliteTable(
 );
 
 export type GenerationRow = typeof generations.$inferSelect;
+
+export const agentRuns = sqliteTable(
+  "agent_runs",
+  {
+    id: text("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    clientId: text("client_id").notNull(),
+    input: text("input").notNull().default("{}"),
+    status: text("status").notNull(),
+    error: text("error"),
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("agent_runs_project_idx").on(table.projectId),
+    uniqueIndex("agent_runs_request_idx").on(table.projectId, table.requestId),
+    uniqueIndex("agent_runs_active_idx")
+      .on(table.projectId)
+      .where(sql`${table.status} = 'running'`),
+  ],
+);
+
+export const agentCommands = sqliteTable(
+  "agent_commands",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    args: text("args").notNull(),
+    expectedRevision: integer("expected_revision"),
+    status: text("status").notNull(),
+    result: text("result"),
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (table) => [index("agent_commands_run_idx").on(table.runId)],
+);
+
+export const generationJobs = sqliteTable(
+  "generation_jobs",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id").notNull(),
+    projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
+    nodeId: text("node_id").notNull(),
+    kind: text("kind").notNull(),
+    input: text("input").notNull(),
+    status: text("status").notNull(),
+    resultUrl: text("result_url"),
+    error: text("error"),
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (table) => [
+    index("generation_jobs_project_idx").on(table.projectId),
+    uniqueIndex("generation_jobs_request_idx").on(table.projectId, table.requestId),
+    uniqueIndex("generation_jobs_active_idx")
+      .on(table.projectId, table.nodeId)
+      .where(sql`${table.status} = 'running'`),
+  ],
+);

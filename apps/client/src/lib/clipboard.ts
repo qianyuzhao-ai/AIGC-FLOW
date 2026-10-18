@@ -5,7 +5,7 @@ import {
   remapPromptTokens,
 } from "@aigc-flow/shared";
 import type { Edge, Node, XYPosition } from "@xyflow/react";
-import { fromPersistedGraph, toPersistedGraph } from "@/lib/graph";
+import { copiedNodeData, fromPersistedGraph, toPersistedGraph } from "@/lib/graph";
 
 /**
  * 画布剪贴板的存放位置：localStorage 单槽，复制一次覆盖一次。
@@ -175,8 +175,8 @@ export function fromClipboardPayload(
         : { x: node.position.x + offset.x, y: node.position.y + offset.y },
       ...(parentId ? { parentId } : {}),
       data: hasPrompt(node.data)
-        ? { ...node.data, prompt: remapPromptTokens(node.data.prompt, idMap) }
-        : node.data,
+        ? { ...copiedNodeData(node.data), prompt: remapPromptTokens(node.data.prompt, idMap) }
+        : copiedNodeData(node.data),
       // 粘出来的这批成为新的选区，接着就能整体拖走
       selected: true,
     };
