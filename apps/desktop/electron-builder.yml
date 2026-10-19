@@ -14,7 +14,15 @@ asar: true
 asarUnpack:
   - "**/node_modules/better-sqlite3/**"
 
+beforePack: build/require-notarization.cjs
 afterPack: build/prune-prebuilds.cjs
+
+publish:
+  provider: github
+  owner: qianyuzhao-ai
+  repo: AIGC-FLOW
+  releaseType: draft
+electronUpdaterCompatibility: ">=2.16"
 
 files:
   - "dist/**/*.cjs"
@@ -44,10 +52,9 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # 没有 Developer ID，做 ad-hoc 签名 —— arm64 上所有可执行文件必须至少有签名，
-  # 而 electron-builder 改完 Info.plist 后 Electron 自带的签名已经失效。
-  # 它不会自动 ad-hoc，必须显式写 "-"。
-  identity: "-"
+  type: distribution
+  forceCodeSigning: true
+  notarize: true
 
 win:
   target:
@@ -55,6 +62,7 @@ win:
       arch: [x64]
 
 nsis:
+  artifactName: "AIGC-FLOW.Setup.${version}.${ext}"
   # 给安装向导，别用一键静默安装
   oneClick: false
   # 装到当前用户目录，免 UAC 提权，内部分发更顺

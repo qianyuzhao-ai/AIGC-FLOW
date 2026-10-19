@@ -13,13 +13,16 @@ async function verifyRuntime(archive, expectedVersion) {
   const db = new Database(":memory:");
   assert.equal(db.prepare("select 1 as value").get().value, 1);
   db.close();
+  const updater = packagedRequire("electron-updater");
+  assert.equal(typeof updater.MacUpdater, "function");
+  assert.equal(typeof updater.NsisUpdater, "function");
 
   const sdkRoot = join(archive, "node_modules", "@earendil-works", "pi-coding-agent");
   const metadata = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8"));
   const sdk = await import(pathToFileURL(join(sdkRoot, metadata.exports["."].import)).href);
   assert.equal(typeof sdk.createAgentSession, "function");
   assert.equal(typeof sdk.SessionManager.continueRecent, "function");
-  console.log(`PASS packaged ${expectedVersion}: SQLite native module and Pi ESM SDK`);
+  console.log(`PASS packaged ${expectedVersion}: SQLite, updater and Pi ESM SDK`);
 }
 
 async function main() {

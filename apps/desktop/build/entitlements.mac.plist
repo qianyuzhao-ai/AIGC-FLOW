@@ -2,15 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!--
-    ad-hoc 签名（identity "-"）下这三条是必需的：
-    Electron 的框架和我们 unpack 出来的 better-sqlite3 .node 各自签名、Team ID 不一致，
-    不放开 library-validation 会在 arm64 上报
-    "not valid for use in process: mapped file has no Team ID"。
-    JIT 两条是 V8 要的。
-  -->
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>

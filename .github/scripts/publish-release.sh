@@ -8,10 +8,17 @@ files=(
   "AIGC-FLOW-${VERSION}-arm64-mac.zip"
   "AIGC-FLOW-${VERSION}-mac.zip"
   "AIGC-FLOW.Setup.${VERSION}.exe"
+  "latest-mac.yml"
+  "latest.yml"
+  "AIGC-FLOW-${VERSION}-arm64.dmg.blockmap"
+  "AIGC-FLOW-${VERSION}.dmg.blockmap"
+  "AIGC-FLOW-${VERSION}-arm64-mac.zip.blockmap"
+  "AIGC-FLOW-${VERSION}-mac.zip.blockmap"
+  "AIGC-FLOW.Setup.${VERSION}.exe.blockmap"
 )
 for file in "${files[@]}"; do
   if [[ ! -s "$file" ]]; then
-    echo "::error::缺少安装包：$file"
+    echo "::error::缺少发布附件：$file"
     exit 1
   fi
 done

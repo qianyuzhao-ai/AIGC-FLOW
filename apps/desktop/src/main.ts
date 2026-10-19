@@ -8,6 +8,7 @@ import { migrationsFolder, webRoot } from "./resources";
 import { createShell } from "./shell";
 import { protectWindowClose } from "./tab-close";
 import { installDesktopWindowApi } from "./tabs";
+import { createUpdateService } from "./update-service";
 
 /**
  * 桌面端固定端口。
@@ -39,6 +40,8 @@ app.setAppUserModelId("com.aigcflow.desktop");
 
 let mainWindow: BrowserWindow | null = null;
 let quitRequested = false;
+let updateRequested = false;
+let updates: ReturnType<typeof createUpdateService> | undefined;
 /** 退出时要收尾的两样东西，will-quit 里用 */
 let teardown: { closeServer: (done: () => void) => void; closeDb: () => void } | null = null;
 
@@ -149,10 +152,14 @@ function createWindow(port: number) {
   installDesktopWindowApi(win);
   protectWindowClose(win, () => {
     quitRequested = false;
+    updateRequested = false;
   });
   win.on("closed", () => {
     mainWindow = null;
-    if (quitRequested) app.quit();
+    if (updateRequested) {
+      updateRequested = false;
+      updates?.install();
+    } else if (quitRequested) app.quit();
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event, target) => {
@@ -176,9 +183,41 @@ app
     // 必须在 app ready 之后：defaultSession 这时才存在
     autoSaveDownloads();
     mainWindow = createWindow(port);
+    updates = createUpdateService(
+      () => mainWindow,
+      () => {
+        if (updateRequested || updates?.installing) return;
+        quitRequested = false;
+        if (mainWindow) {
+          updateRequested = true;
+          mainWindow.close();
+        } else updates?.install();
+      },
+      () => {
+        if (!mainWindow) mainWindow = createWindow(port);
+      },
+    );
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
-        ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+        ...(process.platform === "darwin"
+          ? [
+              {
+                label: app.name,
+                submenu: [
+                  { role: "about" as const },
+                  updates.menuItem,
+                  { type: "separator" as const },
+                  { role: "services" as const },
+                  { type: "separator" as const },
+                  { role: "hide" as const },
+                  { role: "hideOthers" as const },
+                  { role: "unhide" as const },
+                  { type: "separator" as const },
+                  { role: "quit" as const },
+                ],
+              },
+            ]
+          : []),
         {
           label: "文件",
           submenu: [
@@ -193,12 +232,14 @@ app
         { role: "editMenu" },
         { label: "视图", submenu: [{ role: "toggleDevTools" }, { role: "togglefullscreen" }] },
         { role: "windowMenu" },
+        ...(process.platform === "darwin" ? [] : [{ label: "帮助", submenu: [updates.menuItem] }]),
       ]),
     );
 
     // macOS 的惯例：图标还在 dock 上时点一下要能把窗口叫回来
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow(port);
+      if (!updates?.installing && BrowserWindow.getAllWindows().length === 0)
+        mainWindow = createWindow(port);
     });
   })
   .catch((err) => {
