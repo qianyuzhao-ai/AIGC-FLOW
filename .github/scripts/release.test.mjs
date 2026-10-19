@@ -97,7 +97,10 @@ test("distinguishes a missing release, a resumable draft and a published version
     [200, { draft: true }, "draft"],
     [200, { draft: false }, "published"],
   ]) {
-    const request = async () => new Response(JSON.stringify(body), { status });
+    const request = async (url) =>
+      url.includes("/tags/")
+        ? new Response(JSON.stringify(body), { status })
+        : new Response("[]", { status: 200 });
     assert.equal(await releaseState("owner/repo", "v1.2.3", "test-token", request), expected);
   }
   const unavailable = async () => new Response("unavailable", { status: 503 });
@@ -105,4 +108,27 @@ test("distinguishes a missing release, a resumable draft and a published version
     () => releaseState("owner/repo", "v1.2.3", "test-token", unavailable),
     /503/,
   );
+});
+
+test("finds an existing draft on later pages when the published-tag endpoint returns 404", async () => {
+  const calls = [];
+  const request = async (url) => {
+    calls.push(url);
+    if (url.includes("/tags/")) return new Response("{}", { status: 404 });
+    const releases = url.endsWith("page=1")
+      ? Array.from({ length: 100 }, (_, i) => ({ tag_name: `v0.0.${i}`, draft: false }))
+      : [{ tag_name: "v1.2.3", draft: true }];
+    return new Response(JSON.stringify(releases), { status: 200 });
+  };
+  assert.equal(await releaseState("owner/repo", "v1.2.3", "test-token", request), "draft");
+  assert.equal(calls.length, 3);
+  assert.ok(calls[2].endsWith("page=2"));
+});
+
+test("release listing failures never become permission to create another release", async () => {
+  const request = async (url) =>
+    new Response("{}", {
+      status: url.includes("/tags/") ? 404 : 403,
+    });
+  await assert.rejects(() => releaseState("owner/repo", "v1.2.3", "test-token", request), /403/);
 });
