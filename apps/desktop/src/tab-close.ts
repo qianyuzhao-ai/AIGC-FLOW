@@ -58,6 +58,7 @@ export function protectWindowClose(window: BrowserWindow, cancelled = () => {}) 
       } else cancelled();
     })().catch(async () => {
       waiting = false;
+      cancelled();
       if (!window.isDestroyed())
         await dialog.showMessageBox(window, {
           message: "无法完成保存，请稍后再试",

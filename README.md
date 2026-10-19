@@ -136,9 +136,13 @@ Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实
 3. 推送新的 `vX.Y.Z` 标签，触发 `.github/workflows/release.yml`。工作流先校验标签提交
    已进入 `main`、五处包版本一致、对应更新说明存在且该版本未发布，再分别构建 macOS
    arm64 / x64 的 DMG、ZIP，以及 Windows x64 的 EXE。
-4. 两个平台完成打包和运行检查后，统一将本轮的五个安装包及 SHA-256 校验和上传至
+4. 两个平台完成打包和运行检查后，统一将本轮的五个安装包、更新清单、blockmap 及 SHA-256 校验和上传至
    GitHub Release。更新说明取自 `CHANGELOG.md` 对应版本；附件全部上传后自动公开发布。
    `vX.Y.Z-beta.1` 等带后缀的版本会标记为预发布。
+
+macOS 正式发布要求 Developer ID Application 签名与 Apple 公证。首次发布前，按
+[桌面端签名与更新指南](apps/desktop/RELEASING.md) 创建证书并配置五个 Actions Secrets。
+应用支持启动后检查、手动检查、确认下载和重启安装；0.3.0 及更早版本需要手动安装一次新版。
 
 正式发布只有标签 push 一个入口。合并 `main`、推送 `dev` / 功能分支和 PR 均不触发打包，
 也不提供 Actions 手动运行入口。GitHub 标签事件本身没有所属分支过滤，非 `main` 历史中的
@@ -165,7 +169,8 @@ pnpm --filter @aigc-flow/desktop test:package
 ```
 
 安装包位于 `apps/desktop/release/`。本地命令显式使用 `--publish never`，不会创建 Release
-或上传安装包；前端静态导出支持 macOS 和 Windows。常规功能测试无需每次都打完整安装包，
+或上传安装包；使用独立的 `electron-builder.local.yml`，macOS 为 ad-hoc 测试签名，
+且不连接更新源。前端静态导出支持 macOS 和 Windows。常规功能测试无需每次都打完整安装包，
 可先用 `pnpm desktop` 调试。
 
 工作流在上传前使用打包后的 Electron 检查 SQLite 原生模块和 Pi SDK。检查会将应用归档

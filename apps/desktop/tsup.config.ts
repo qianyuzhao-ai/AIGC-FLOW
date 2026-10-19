@@ -11,7 +11,12 @@ import { defineConfig } from "tsup";
  * 一个「匹配一切」的 noExternal 会把它们又拽回来（实测 better-sqlite3 被内联，
  * 产物里出现了 getPrebuildPath）。所以 noExternal 必须用负向断言排除外部依赖。
  */
-const EXTERNAL = ["electron", "better-sqlite3", "@earendil-works/pi-coding-agent"];
+const EXTERNAL = [
+  "electron",
+  "electron-updater",
+  "better-sqlite3",
+  "@earendil-works/pi-coding-agent",
+];
 
 export default defineConfig({
   entry: ["src/main.ts", "src/preload.ts"],

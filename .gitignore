@@ -16,6 +16,9 @@ build/
 .env.local
 .env.*.local
 !.env.example
+*.p12
+*.p8
+*.pfx
 
 # database (SQLite 单文件 + WAL)
 *.db

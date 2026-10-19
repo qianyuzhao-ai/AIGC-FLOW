@@ -1,0 +1,8 @@
+extends: ./electron-builder.yml
+publish: null
+mac:
+  identity: "-"
+  forceCodeSigning: false
+  notarize: false
+  entitlements: build/entitlements.local.plist
+  entitlementsInherit: build/entitlements.local.plist

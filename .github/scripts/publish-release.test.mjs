@@ -9,7 +9,12 @@ import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(new URL("./publish-release.sh", import.meta.url));
 
-function publish({ state = "absent", failUpload = false, missingPackage = false } = {}) {
+function publish({
+  state = "absent",
+  failUpload = false,
+  missingPackage = false,
+  missingFile,
+} = {}) {
   const cwd = mkdtempSync(join(tmpdir(), "aigc publish "));
   mkdirSync(join(cwd, "bin"));
   mkdirSync(join(cwd, "dist"));
@@ -20,8 +25,17 @@ function publish({ state = "absent", failUpload = false, missingPackage = false 
     "AIGC-FLOW-1.2.3-arm64-mac.zip",
     "AIGC-FLOW-1.2.3-mac.zip",
     "AIGC-FLOW.Setup.1.2.3.exe",
+    "latest-mac.yml",
+    "latest.yml",
+    "AIGC-FLOW-1.2.3-arm64.dmg.blockmap",
+    "AIGC-FLOW-1.2.3.dmg.blockmap",
+    "AIGC-FLOW-1.2.3-arm64-mac.zip.blockmap",
+    "AIGC-FLOW-1.2.3-mac.zip.blockmap",
+    "AIGC-FLOW.Setup.1.2.3.exe.blockmap",
   ];
-  for (const file of missingPackage ? files.slice(0, -1) : files) {
+  for (const file of files.filter(
+    (file) => file !== missingFile && !(missingPackage && file.endsWith(".exe")),
+  )) {
     writeFileSync(join(cwd, "dist", file), `fixture ${file}`);
   }
   const log = join(cwd, "calls.jsonl");
@@ -53,7 +67,7 @@ function publish({ state = "absent", failUpload = false, missingPackage = false 
   return { cwd, result, calls, files };
 }
 
-test("publishes only after all five packages and their checksums are uploaded", () => {
+test("publishes only after installers, update metadata, blockmaps and checksums are uploaded", () => {
   const { cwd, result, calls, files } = publish();
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(
@@ -65,7 +79,7 @@ test("publishes only after all five packages and their checksums are uploaded", 
   assert.ok(calls[2].includes("--draft=false"));
   for (const file of files) assert.ok(calls[1].includes(file));
   const checksums = readFileSync(join(cwd, "dist/aigc-flow-v1.2.3-SHA256SUMS.txt"), "utf8");
-  assert.equal(checksums.trim().split("\n").length, 5);
+  assert.equal(checksums.trim().split("\n").length, files.length);
   for (const file of files) {
     const digest = createHash("sha256").update(`fixture ${file}`).digest("hex");
     assert.ok(checksums.includes(`${digest}  ${file}\n`));
@@ -89,7 +103,13 @@ test("upload failure keeps the release unpublished; retry resumes the draft", ()
 });
 
 test("missing packages and published versions cannot upload or publish", () => {
-  for (const options of [{ missingPackage: true }, { state: "published" }]) {
+  for (const options of [
+    { missingPackage: true },
+    { state: "published" },
+    { missingFile: "latest-mac.yml" },
+    { missingFile: "latest.yml" },
+    { missingFile: "AIGC-FLOW.Setup.1.2.3.exe.blockmap" },
+  ]) {
     const { result, calls } = publish(options);
     assert.notEqual(result.status, 0);
     assert.deepEqual(calls, []);

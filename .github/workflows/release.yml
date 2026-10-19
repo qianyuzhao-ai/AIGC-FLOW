@@ -45,7 +45,7 @@ jobs:
   build:
     name: 打包 ${{ matrix.platform }}
     needs: prepare
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       # 一边挂了另一边继续，别让 mac 的问题连带毙掉 win 的产物
       fail-fast: false
@@ -69,6 +69,22 @@ jobs:
           ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false
 
+      - name: 检查 macOS 签名与公证凭据
+        if: runner.os == 'macOS'
+        run: |
+          for key in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!key}" ]]; then
+              echo "::error::缺少 GitHub Actions Secret: $key"
+              exit 1
+            fi
+          done
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
       # pnpm 必须在 setup-node 之前：setup-node 的 cache: pnpm 要求 pnpm 已就位
       - uses: pnpm/action-setup@v4
 
@@ -86,15 +102,37 @@ jobs:
           DESKTOP: "1"
       - run: pnpm --filter @aigc-flow/desktop run build
 
-      - name: Package
+      - name: 签名并公证 macOS 安装包
+        if: runner.os == 'macOS'
         working-directory: apps/desktop
         run: pnpm exec electron-builder ${{ matrix.args }} --publish never
         env:
-          # 没有证书：关掉钥匙串里的证书自动发现，mac 侧走配置里的 ad-hoc（identity: "-"）
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: 打包 Windows
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder ${{ matrix.args }} --publish never
+
+      - name: 验证 macOS 签名与公证票据
+        if: runner.os == 'macOS'
+        run: |
+          for arch in mac-arm64 mac; do
+            app="apps/desktop/release/$arch/AIGC-FLOW.app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+          done
 
       - name: Verify packaged runtime
         run: pnpm --filter @aigc-flow/desktop run test:package
+
+      - name: 验证更新清单、架构与安装包校验和
+        run: node apps/desktop/build/verify-update-metadata.cjs
 
       - uses: actions/upload-artifact@v4
         with:
@@ -103,6 +141,8 @@ jobs:
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
+            apps/desktop/release/latest*.yml
+            apps/desktop/release/*.blockmap
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

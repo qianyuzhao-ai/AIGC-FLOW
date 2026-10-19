@@ -8,16 +8,18 @@
     "start": "electron dist/main.cjs",
     "typecheck": "tsc --noEmit",
     "build:web": "node build/build-web.cjs",
-    "dist:mac": "pnpm run build:web && pnpm run build && electron-builder --mac --arm64 --x64 --publish never",
-    "dist:win": "pnpm run build:web && pnpm run build && electron-builder --win --publish never",
-    "dist:all": "pnpm run build:web && pnpm run build && electron-builder --mac --arm64 --x64 --publish never && electron-builder --win --publish never",
-    "test": "tsup --config test.config.ts && node --test dist/tests/unit/*.cjs",
+    "dist:mac": "pnpm run build:web && pnpm run build && electron-builder --config electron-builder.local.yml --mac --arm64 --x64 --publish never",
+    "dist:win": "pnpm run build:web && pnpm run build && electron-builder --config electron-builder.local.yml --win --publish never",
+    "dist:all": "pnpm run build:web && pnpm run build && electron-builder --config electron-builder.local.yml --mac --arm64 --x64 --publish never && electron-builder --config electron-builder.local.yml --win --publish never",
+    "test": "tsup --config test.config.ts && node --test dist/tests/unit/*.cjs build/*.test.cjs",
     "test:package": "node build/verify-package.cjs",
-    "test:smoke": "tsup --config test.config.ts && electron dist/tests/smoke.cjs"
+    "test:smoke": "tsup --config test.config.ts && electron dist/tests/smoke.cjs",
+    "test:update": "tsup --config test.config.ts && electron dist/tests/update-smoke.cjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.3.0",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@aigc-flow/server": "workspace:*",
@@ -29,6 +31,7 @@
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
     "hono": "^4.13.5",
+    "js-yaml": "^4.3.2",
     "tsup": "^8.5.1",
     "typescript": "5.9.3"
   }
