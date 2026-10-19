@@ -7,6 +7,7 @@ export * from "./media";
 export * from "./media-ref";
 export * from "./node-mark";
 export * from "./pi";
+export * from "./pi-skills";
 export * from "./project";
 export * from "./prompt-token";
 export * from "./settings";

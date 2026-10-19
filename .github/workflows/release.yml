@@ -1,17 +1,51 @@
 name: Release
+run-name: Release ${{ github.ref_name }}
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      source_ref:
-        description: "待构建的标签或提交；留空使用运行工作流的分支"
-        required: false
-        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
+  prepare:
+    name: 校验 main 标签与版本
+    if: github.event.deleted == false && github.event.forced == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 校验标签归属、版本和更新说明
+        id: release
+        run: node .github/scripts/prepare-release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   build:
+    name: 打包 ${{ matrix.platform }}
+    needs: prepare
+    timeout-minutes: 30
     strategy:
       # 一边挂了另一边继续，别让 mac 的问题连带毙掉 win 的产物
       fail-fast: false
@@ -20,15 +54,20 @@ jobs:
           # macos runner 现在是 arm64，但 x64 的 Electron 二进制只是下载，不需要 x64 机器。
           # 刻意不打 universal：pnpm workspace 下合并有静默失败的 issue #9366
           - os: macos-latest
+            platform: macOS
+            artifact: dist-macos
             args: --mac --arm64 --x64
           - os: windows-latest
+            platform: Windows
+            artifact: dist-windows
             args: --win
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
 
       # pnpm 必须在 setup-node 之前：setup-node 的 cache: pnpm 要求 pnpm 已就位
       - uses: pnpm/action-setup@v4
@@ -59,9 +98,46 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}
+          name: ${{ matrix.artifact }}
           path: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
           if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  release:
+    name: 发布本轮安装包
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: 再次确认标签未移动且版本未发布
+        id: release
+        run: node .github/scripts/prepare-release.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: 上传安装包与校验和后发布
+        run: bash .github/scripts/publish-release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          RELEASE_STATE: ${{ steps.release.outputs.state }}

@@ -1,6 +1,6 @@
 {
   "name": "@aigc-flow/client",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
@@ -11,6 +11,7 @@
   "dependencies": {
     "@aigc-flow/server": "workspace:*",
     "@aigc-flow/shared": "workspace:*",
+    "@shadcn/react": "^0.3.1",
     "@xyflow/react": "12.11.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -23,6 +24,8 @@
     "radix-ui": "^1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "shadcn": "^4.19.0",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",

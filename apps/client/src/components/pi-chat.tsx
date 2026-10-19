@@ -1,20 +1,23 @@
 "use client";
 
-import { CANVAS_TOOL_LABELS } from "@aigc-flow/shared";
-import { Bot, Square, X } from "lucide-react";
+import { Bot, History, SquarePen, X } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
-import {
-  type FormEvent,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useProjectAgent } from "@/components/agent-workspace";
+import { PiChatHistory } from "@/components/pi-chat-history";
+import { PiChatInput } from "@/components/pi-chat-input";
+import { PiChatMessageRow } from "@/components/pi-chat-message";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import type { usePiChatResize } from "@/hooks/use-pi-chat-resize";
 import { CanvasPortalContext } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
 
@@ -29,10 +32,12 @@ export function PiChat({
   projectId,
   open,
   onOpenChange,
+  resize,
 }: {
   projectId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  resize: ReturnType<typeof usePiChatResize>;
 }) {
   const [mounted, setMounted] = useState(false);
   const container = useContext(CanvasPortalContext);
@@ -64,6 +69,7 @@ export function PiChat({
                 <PiChatPanel
                   key={projectId}
                   projectId={projectId}
+                  resize={resize}
                   onClose={() => {
                     onOpenChange(false);
                     trigger.current?.focus({ preventScroll: true });
@@ -78,45 +84,43 @@ export function PiChat({
   );
 }
 
-function PiChatPanel({ projectId, onClose }: { projectId: number; onClose: () => void }) {
+function PiChatPanel({
+  projectId,
+  onClose,
+  resize,
+}: {
+  projectId: number;
+  onClose: () => void;
+  resize: ReturnType<typeof usePiChatResize>;
+}) {
   const isPresent = useIsPresent();
   const reducedMotion = useReducedMotion();
   const runtime = useProjectAgent(projectId);
   const state = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   const { messages, loading, error, commands, jobs } = state;
   const busy = state.run?.status === "running";
-  const partial = state.run?.partial ?? "";
-  const [draft, setDraft] = useState("");
-  const input = useRef<HTMLTextAreaElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
+  const [history, setHistory] = useState(false);
   useEffect(() => {
-    if (isPresent) {
-      void runtime.load();
-      input.current?.focus({ preventScroll: true });
-    }
+    if (state.draftImages.length) setHistory(false);
+  }, [state.draftImages]);
+  useEffect(() => {
+    if (isPresent) void runtime.load();
   }, [runtime, isPresent]);
   useEffect(() => {
-    if ((messages.length || partial || commands.length) && follow.current && scroller.current)
-      scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [messages, partial, commands]);
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    if (busy || loading || !draft.trim()) return;
-    try {
-      await runtime.send(draft.trim());
-      setDraft("");
-      follow.current = true;
-    } catch {
-      /* 错误由项目运行时展示，保留草稿供重试。 */
-    }
-  }
-  const stop = () => {
-    void runtime.stop();
-  };
+    const refresh = () => void runtime.refreshSessionInfo();
+    window.addEventListener("pi-configuration-changed", refresh);
+    return () => window.removeEventListener("pi-configuration-changed", refresh);
+  }, [runtime]);
+  useEffect(() => {
+    const refresh = () => void runtime.refreshSkills();
+    window.addEventListener("pi-skills-changed", refresh);
+    return () => window.removeEventListener("pi-skills-changed", refresh);
+  }, [runtime]);
 
   return (
     <motion.aside
+      ref={resize.panelRef}
+      style={{ width: resize.width }}
       id={`pi-chat-panel-${projectId}`}
       aria-label="Pi 对话"
       aria-hidden={!isPresent}
@@ -125,154 +129,149 @@ function PiChatPanel({ projectId, onClose }: { projectId: number; onClose: () =>
       animate={{ x: 0 }}
       exit={{ x: "100%", transition: piChatTransition(false, reducedMotion) }}
       transition={piChatTransition(true, reducedMotion)}
-      className="pointer-events-auto absolute inset-y-0 right-0 flex w-(--pi-chat-width) flex-col border-l bg-background shadow-lg"
+      className="pointer-events-auto absolute inset-y-0 right-0 flex flex-col border-l bg-background shadow-lg"
     >
-      <div className="flex items-center justify-between border-b p-3">
-        <div>
-          <p className="font-medium">Pi 对话</p>
-          <p className="text-muted-foreground text-xs">当前项目的创作助手</p>
-        </div>
-        <Button variant="ghost" size="icon-sm" aria-label="关闭 Pi 对话" onClick={onClose}>
-          <X />
-        </Button>
-      </div>
+      {/* biome-ignore lint/a11y/useSemanticElements: 可拖动和键盘调节的分隔条，不是静态水平线。 */}
       <div
-        ref={scroller}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
-        onScroll={() => {
-          const element = scroller.current;
-          if (element)
-            follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
-        }}
-      >
-        {loading && (
-          <p role="status" className="text-muted-foreground text-sm">
-            读取对话中…
-          </p>
-        )}
-        {!loading && messages.length === 0 && (
-          <p className="text-muted-foreground text-sm">
-            可以讨论创意，或让我创建节点、填写提示词、连接、排列及生成图片和视频。
-          </p>
-        )}
-        {messages.map((message) => (
-          <div key={message.id} className="space-y-1">
-            <p className="font-medium text-muted-foreground text-xs">
-              {message.role === "user" ? "你" : "Pi"}
-            </p>
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {message.text}
-            </p>
-          </div>
-        ))}
-        {partial && (
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{partial}</p>
-        )}
-        {busy && (
-          <p role="status" className="text-muted-foreground text-xs">
-            Pi 正在回复…
-          </p>
-        )}
+        role="separator"
+        aria-label="调整对话宽度"
+        aria-orientation="vertical"
+        aria-valuemin={resize.bounds.min}
+        aria-valuemax={resize.bounds.max}
+        aria-valuenow={resize.width}
+        aria-controls={`pi-chat-panel-${projectId}`}
+        tabIndex={0}
+        className="absolute inset-y-0 -left-1 z-10 w-2 touch-none cursor-ew-resize hover:bg-border/60 focus-visible:bg-ring/40 focus-visible:outline-none"
+        {...resize.handleProps}
+      />
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b p-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Bot className="size-4 shrink-0 text-muted-foreground" />
+          <p className="font-medium text-sm">Pi 对话</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            aria-label="新建对话"
+            title="新建对话"
+            disabled={busy || loading}
+            onClick={async () => {
+              await runtime.newConversation();
+              setHistory(false);
+            }}
+          >
+            <SquarePen />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="历史对话"
+            title="历史对话"
+            aria-pressed={history}
+            onClick={() => {
+              setHistory(!history);
+              void runtime.refreshConversations();
+            }}
+          >
+            <History />
+          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label="关闭 Pi 对话" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
       </div>
-      {commands.length > 0 && (
-        <section className="max-h-52 space-y-2 overflow-auto border-t p-3" aria-label="画布任务">
-          {commands.map((command) => (
-            <details key={command.id} className="rounded border p-2 text-xs">
-              <summary className="cursor-pointer">
-                {CANVAS_TOOL_LABELS[command.name]} ·{" "}
-                {
-                  {
-                    pending: "执行中",
-                    completed: "已完成",
-                    failed: "失败",
-                    cancelled: "已停止",
-                    unknown: "结果未知",
-                  }[command.status]
-                }
-                {command.status === "pending" && command.progress ? ` · ${command.progress}` : ""}
-              </summary>
-              <p className="mt-2 whitespace-pre-wrap">
-                {command.result?.message ?? (command.result?.success ? "执行完成" : "等待执行回执")}
-              </p>
-              {Array.isArray(command.result?.data.nodeIds) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const ids = command.result?.data.nodeIds;
-                    if (Array.isArray(ids))
-                      runtime.focus(ids.filter((id): id is string => typeof id === "string"));
-                  }}
-                >
-                  定位节点
-                </Button>
-              )}
-            </details>
-          ))}
-        </section>
-      )}
-      {jobs.length > 0 && (
-        <section
-          className="max-h-32 space-y-1 overflow-auto border-t p-3 text-xs"
-          aria-label="生成任务"
-        >
-          {jobs.map((job) => (
-            <div key={job.id}>
-              {job.kind === "image" ? "图片" : "视频"} ·{" "}
-              {
-                { running: "生成中", succeeded: "成功", failed: "失败", unknown: "结果未知" }[
-                  job.status
-                ]
-              }
-              {job.resultUrl && (
-                <a className="ml-2 underline" href={job.resultUrl} target="_blank" rel="noreferrer">
-                  查看结果
-                </a>
-              )}
-              {job.error && <span className="ml-2 text-destructive">{job.error}</span>}
-            </div>
-          ))}
-        </section>
-      )}
-      <form onSubmit={send} className="space-y-2 border-t p-3">
-        {error && (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        )}
-        <label htmlFor={`pi-message-${projectId}`} className="sr-only">
-          发送给 Pi 的消息
-        </label>
-        <Textarea
-          ref={input}
-          id={`pi-message-${projectId}`}
-          value={draft}
-          maxLength={32000}
-          placeholder="输入消息…"
-          className="max-h-40 resize-none"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
+      {history && (
+        <PiChatHistory
+          conversations={state.conversations}
+          onRename={(id, title) => runtime.renameConversation(id, title)}
+          currentId={state.conversationId}
+          disabled={busy || loading}
+          onBack={() => setHistory(false)}
+          onSelect={async (id) => {
+            await runtime.load(id);
+            if (runtime.getSnapshot().conversationId === id) setHistory(false);
           }}
         />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-muted-foreground text-xs">Enter 发送 · Shift+Enter 换行</span>
-          {busy ? (
-            <Button type="button" variant="outline" onClick={stop}>
-              <Square />
-              停止
-            </Button>
-          ) : (
-            <Button type="submit" disabled={loading || !draft.trim()}>
-              发送
-            </Button>
-          )}
-        </div>
-      </form>
+      )}
+      {history && error && (
+        <p role="alert" className="p-3 text-destructive text-xs">
+          {error}
+        </p>
+      )}
+      <div className={cn("flex min-h-0 flex-1 flex-col", history && "hidden")}>
+        <MessageScrollerProvider
+          key={`transcript-${state.conversationId ?? "initial"}`}
+          defaultScrollPosition="end"
+        >
+          <MessageScroller className="min-h-0 flex-1">
+            <MessageScrollerViewport>
+              <MessageScrollerContent
+                className="gap-5 p-4"
+                aria-busy={busy || loading}
+                aria-label="对话记录"
+              >
+                {loading && messages.length === 0 && (
+                  <MessageScrollerItem>
+                    <p role="status" className="text-muted-foreground text-sm">
+                      读取对话中…
+                    </p>
+                  </MessageScrollerItem>
+                )}
+                {!loading && messages.length === 0 && (
+                  <MessageScrollerItem>
+                    <div className="space-y-2 py-10 text-center">
+                      <Bot className="mx-auto size-7 text-muted-foreground" />
+                      <p className="font-medium text-sm">从一个想法开始</p>
+                      <p className="mx-auto max-w-64 text-muted-foreground text-sm leading-relaxed">
+                        讨论创意、操作画布，或选择图片一起分析。对话会自动保存在当前项目。
+                      </p>
+                    </div>
+                  </MessageScrollerItem>
+                )}
+                {messages.map((message) => {
+                  const current = message.role === "assistant" && message.runId === state.run?.id;
+                  return (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === "user"}
+                    >
+                      <PiChatMessageRow
+                        message={message}
+                        jobs={jobs}
+                        onFocus={(ids) => runtime.focus(ids)}
+                        streaming={current && busy}
+                        partial={current ? state.run?.partial : ""}
+                        commands={current ? commands : message.commands}
+                        error={current ? state.run?.error : message.error}
+                      />
+                    </MessageScrollerItem>
+                  );
+                })}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton
+              aria-label="回到最新消息"
+              behavior={reducedMotion ? "instant" : "smooth"}
+              className="motion-reduce:transition-none"
+            />
+          </MessageScroller>
+        </MessageScrollerProvider>
+        <PiChatInput
+          key={`composer-${state.conversationId ?? "initial"}`}
+          runtime={runtime}
+          busy={busy}
+          loading={loading}
+          error={error}
+          images={state.draftImages}
+          sessionInfo={state.sessionInfo}
+          thinkingLevel={state.thinkingLevel}
+          skills={state.skills}
+        />
+      </div>
     </motion.aside>
   );
 }

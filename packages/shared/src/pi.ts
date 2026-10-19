@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agentCommandViewSchema, agentRunViewSchema } from "./agent";
+import { agentCommandViewSchema, agentRunViewSchema, piThinkingLevelSchema } from "./agent";
 
 const providerIdSchema = z
   .string()
@@ -45,6 +45,11 @@ export const piConnectionSchema = z
         name: z.string().trim().min(1, "请填写服务名称").max(100).optional(),
         contextWindow: z.number().int().positive().max(10_000_000),
         maxTokens: z.number().int().positive().max(1_000_000),
+        reasoning: z.boolean().default(false),
+        input: z
+          .array(z.enum(["text", "image"]))
+          .min(1)
+          .default(["text"]),
       })
       .refine((value) => value.maxTokens <= value.contextWindow, {
         message: "输出上限不能超过上下文长度",
@@ -61,7 +66,12 @@ export type PiProviderView = {
   name: string;
   configured: boolean;
   custom?: z.infer<typeof piCustomEndpointSchema>;
-  models: (PiModelOption & { contextWindow: number; maxTokens: number })[];
+  models: (PiModelOption & {
+    contextWindow: number;
+    maxTokens: number;
+    input: string[];
+    reasoning: boolean;
+  })[];
 };
 export type PiConfiguration = {
   providers: PiProviderView[];
@@ -76,7 +86,38 @@ export const piChatMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["user", "assistant"]),
   text: z.string(),
+  runId: z.string().optional(),
+  error: z.string().nullable().optional(),
+  skillReads: z.array(z.object({ name: z.string(), file: z.string() })).optional(),
+  attachments: z
+    .array(z.object({ nodeId: z.string(), label: z.string(), url: z.string() }))
+    .default([]),
+  commands: z.array(agentCommandViewSchema).default([]),
 });
+export const piConversationSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const renamePiConversationSchema = z.object({
+  title: z.string().trim().min(1, "请输入对话名称").max(100, "对话名称最多 100 个字符"),
+});
+export type PiConversation = z.infer<typeof piConversationSchema>;
+export type PiImageAttachment = PiChatMessage["attachments"][number];
+export const piSessionInfoSchema = z.object({
+  model: z.object({ id: z.string(), name: z.string(), provider: z.string() }).nullable(),
+  thinkingLevel: piThinkingLevelSchema,
+  thinkingLevels: z.array(piThinkingLevelSchema),
+  context: z
+    .object({
+      tokens: z.number().nullable(),
+      contextWindow: z.number(),
+      percent: z.number().nullable(),
+    })
+    .nullable(),
+});
+export type PiSessionInfo = z.infer<typeof piSessionInfoSchema>;
 export const piChatEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("partial"), text: z.string() }),
   z.object({

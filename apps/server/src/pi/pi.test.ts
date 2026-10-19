@@ -15,6 +15,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { z } from "zod";
 import { applyCanvasTool, type CanvasState } from "../../../client/src/lib/agent/canvas-tools";
 import { readPiStream } from "../../../client/src/lib/pi-stream";
+import { skillManifest, skillZip } from "./skills/test-archive";
 
 const historySchema = z.object({
   messages: z.array(piChatMessageSchema),
@@ -122,6 +123,18 @@ const upstream = createServer(async (request, response) => {
   const userIndex = body.messages.findLastIndex(
     (message: { role: string }) => message.role === "user",
   );
+  if (JSON.stringify(body.messages[userIndex]?.content).includes("use-installed-skill")) {
+    const count = body.messages
+      .slice(userIndex + 1)
+      .filter((message: { role: string }) => message.role === "tool").length;
+    if (count < 2) {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(
+        `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `skill-${count}`, type: "function", function: { name: "read_skill", arguments: JSON.stringify({ name: "integration-guide", file: count ? "references/checklist.md" : "SKILL.md" }) } }] }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+      );
+      return;
+    }
+  }
   if (JSON.stringify(body.messages[userIndex]?.content).includes("tool-loop")) {
     const results = body.messages
       .slice(userIndex + 1)
@@ -204,7 +217,9 @@ test("Pi configuration and project conversation", async (t) => {
     upstream.once("error", reject);
     upstream.listen(0, "127.0.0.1", resolve);
   });
-  t.after(() => {
+  t.after(async () => {
+    await (await getProjectSession(first.id)).waitForIdle();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     upstream.closeAllConnections();
     upstream.close();
     db.$client.close();
@@ -479,6 +494,11 @@ test("Pi configuration and project conversation", async (t) => {
         }
       }
       assert.equal(seen.size, 3);
+      const transcript = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.deepEqual(
+        transcript.messages.at(-1)?.commands.map((command) => command.name),
+        ["get_canvas", "create_nodes", "arrange_nodes"],
+      );
       assert.equal(state.nodes.length, 3);
       assert.deepEqual(
         state.nodes.map((node) => node.position.x),
@@ -621,6 +641,322 @@ test("Pi configuration and project conversation", async (t) => {
     assert.equal(blocked.status, 400);
     assert.equal(generated, 2);
   });
+
+  await t.test("new conversations persist independently and cannot cross projects", async () => {
+    const old = (await (await app.request(chatPath)).json()) as { conversationId: string };
+    const created = await app.request(`/api/pi/projects/${first.id}/conversations`, {
+      method: "POST",
+    });
+    assert.equal(created.status, 201);
+    const { id: conversationId } = (await created.json()) as { id: string };
+    const empty = historySchema.parse(
+      await (await app.request(`${chatPath}?conversationId=${conversationId}`)).json(),
+    );
+    assert.deepEqual(empty.messages, []);
+    assert.equal(empty.run, null);
+    assert.equal(
+      (await app.request(`/api/pi/projects/${second.id}/messages?conversationId=${conversationId}`))
+        .status,
+      400,
+    );
+    const sent = await jsonRequest(chatPath, {
+      message: "fresh conversation",
+      conversationId,
+      clientId,
+      requestId: crypto.randomUUID(),
+    });
+    const { runId } = (await sent.json()) as { runId: string };
+    await collect(readPiStream(await eventsFor(runId)));
+    const body = received.at(-1)?.body;
+    assert.ok(!JSON.stringify(body?.messages).includes("tool-loop"));
+    const { sdk } = await getPiRuntime();
+    const reopened = sdk.SessionManager.continueRecent(
+      join(directory, "pi/workspace", String(first.id)),
+      join(directory, "pi/sessions", String(first.id), conversationId),
+    );
+    assert.deepEqual(
+      chatMessages({ sessionManager: reopened }).map((message) => message.text),
+      ["fresh conversation", "你好，Pi 已连接。"],
+    );
+    const previous = historySchema.parse(
+      await (await app.request(`${chatPath}?conversationId=${old.conversationId}`)).json(),
+    );
+    assert.ok(previous.messages.some((message) => message.text === "hello"));
+    const listing = (await (
+      await app.request(`/api/pi/projects/${first.id}/conversations`)
+    ).json()) as { conversations: { id: string; title: string }[] };
+    assert.equal(
+      listing.conversations.find((item) => item.id === conversationId)?.title,
+      "fresh conversation",
+    );
+  });
+
+  await t.test(
+    "sends selected image pixels, persists attachments, and rejects non-images",
+    async (t) => {
+      const graphPath = `/api/projects/${first.id}/graph`;
+      const { graph, version } = (await (await app.request(graphPath)).json()) as {
+        graph: { nodes: unknown[] };
+        version: number;
+      };
+      const imageUrl = "https://test.bcebos.com/test.png";
+      graph.nodes.push(
+        ...["photo-a", "photo-b"].map((id) => ({
+          id,
+          type: "media",
+          position: { x: 0, y: 0 },
+          data: { label: id, kind: "image", status: "ready", url: imageUrl },
+        })),
+      );
+      assert.equal(
+        (await jsonRequest(graphPath, { graph, expectedVersion: version }, "PUT")).status,
+        200,
+      );
+      const request = {
+        message: "compare photos",
+        clientId,
+        requestId: crypto.randomUUID(),
+        imageNodeIds: ["photo-a", "photo-b"],
+      };
+      assert.equal((await jsonRequest(chatPath, request)).status, 400);
+      await jsonRequest(
+        "/api/pi/configuration",
+        { ...connection, custom: { ...connection.custom, input: ["text", "image"] } },
+        "PUT",
+      );
+      const originalFetch = globalThis.fetch;
+      const png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==";
+      t.mock.method(
+        globalThis,
+        "fetch",
+        (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+          String(input) === imageUrl
+            ? Promise.resolve(
+                new Response(Buffer.from(png, "base64"), {
+                  headers: { "content-type": "image/png" },
+                }),
+              )
+            : originalFetch(input, init),
+      );
+      const sent = await jsonRequest(chatPath, request);
+      assert.equal(sent.status, 202, await sent.clone().text());
+      const { runId } = (await sent.json()) as { runId: string };
+      await collect(readPiStream(await eventsFor(runId)));
+      const body = received.at(-1)?.body as {
+        messages: { role: string; content: { type: string; image_url?: { url: string } }[] }[];
+      };
+      const content = body.messages.findLast((message) => message.role === "user")?.content;
+      const afterImages = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.equal(afterImages.run?.status, "completed", afterImages.run?.error ?? "");
+      assert.equal(
+        content?.filter((part) => part.type === "image_url").length,
+        2,
+        JSON.stringify(content),
+      );
+      assert.ok(content?.some((part) => part.image_url?.url === `data:image/png;base64,${png}`));
+      const history = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.deepEqual(
+        history.messages.at(-2)?.attachments.map((item) => item.nodeId),
+        ["photo-a", "photo-b"],
+      );
+      assert.equal(history.messages.at(-2)?.text, "compare photos");
+      for (const nodeId of ["video", "missing"]) {
+        assert.equal(
+          (
+            await jsonRequest(chatPath, {
+              ...request,
+              requestId: crypto.randomUUID(),
+              imageNodeIds: [nodeId],
+            })
+          ).status,
+          400,
+        );
+      }
+    },
+  );
+  await t.test(
+    "concurrent retries share one run and an immediately cancelled prompt remains in history",
+    async () => {
+      const request = { message: "slow", clientId, requestId: crypto.randomUUID() };
+      const responses = await Promise.all([
+        jsonRequest(chatPath, request),
+        jsonRequest(chatPath, request),
+      ]);
+      assert.deepEqual(
+        responses.map((response) => response.status),
+        [202, 202],
+      );
+      const runs = (await Promise.all(responses.map((response) => response.json()))) as {
+        runId: string;
+      }[];
+      const runId = runs[0]?.runId;
+      assert.equal(runId, runs[1]?.runId);
+      await app.request(`/api/pi/projects/${first.id}/runs/${runId}/cancel`, { method: "POST" });
+      await (await getProjectSession(first.id)).waitForIdle();
+      const history = historySchema.parse(await (await app.request(chatPath)).json());
+      const turn = history.messages.filter((message) => message.runId === runId);
+      assert.equal(turn.filter((message) => message.role === "user").length, 1);
+      assert.equal(turn[0]?.text, "slow");
+      assert.ok(turn.find((message) => message.role === "assistant")?.error);
+      assert.equal((await jsonRequest(chatPath, { ...request, message: "changed" })).status, 400);
+    },
+  );
+  await t.test(
+    "session info exposes supported thinking levels and persists the selected effort",
+    async () => {
+      const path = `/api/pi/projects/${first.id}/session-info`;
+      const before = (await (await app.request(path)).json()) as { thinkingLevels: string[] };
+      assert.deepEqual(before.thinkingLevels, []);
+      assert.equal(
+        (
+          await jsonRequest(chatPath, {
+            message: "hello",
+            clientId,
+            requestId: crypto.randomUUID(),
+            thinkingLevel: "high",
+          })
+        ).status,
+        400,
+      );
+      await jsonRequest(
+        "/api/pi/configuration",
+        {
+          ...connection,
+          custom: { ...connection.custom, reasoning: true, input: ["text", "image"] },
+        },
+        "PUT",
+      );
+      const supported = (await (await app.request(path)).json()) as {
+        model: { id: string };
+        thinkingLevels: string[];
+      };
+      assert.equal(supported.model.id, "test-model");
+      assert.ok(supported.thinkingLevels.includes("high"));
+      const response = await jsonRequest(chatPath, {
+        message: "hello reasoning",
+        clientId,
+        requestId: crypto.randomUUID(),
+        thinkingLevel: "high",
+      });
+      assert.equal(response.status, 202);
+      const { runId } = (await response.json()) as { runId: string };
+      await collect(readPiStream(await eventsFor(runId)));
+      assert.equal(received.at(-1)?.body.reasoning_effort, "high");
+      const info = (await (await app.request(path)).json()) as {
+        thinkingLevel: string;
+        context: { tokens: number; contextWindow: number };
+      };
+      assert.equal(info.thinkingLevel, "high");
+      assert.ok(info.context.tokens > 0);
+      assert.equal(info.context.contextWindow, 32768);
+      const session = await getProjectSession(first.id);
+      const { sdk } = await getPiRuntime();
+      const file = session.sessionManager.getSessionFile();
+      assert.ok(file);
+      assert.equal(sdk.SessionManager.open(file).buildSessionContext().thinkingLevel, "high");
+    },
+  );
+  await t.test(
+    "installed skills refresh existing sessions, load references and expand explicit commands",
+    async () => {
+      const bytes = skillZip([
+        {
+          name: "guide/SKILL.md",
+          content: `${skillManifest("integration-guide")}\nONLY_IN_FULL_SKILL_TEXT\n`,
+        },
+        { name: "guide/references/checklist.md", content: "REFERENCE_CHECKLIST_CONTENT" },
+      ]);
+      const form = new FormData();
+      form.set("file", new File([new Uint8Array(bytes)], "guide.skill"));
+      const previewResponse = await app.request("/api/pi/skills/preview", {
+        method: "POST",
+        body: form,
+      });
+      const preview = (await previewResponse.json()) as { id: string; skills: { id: string }[] };
+      assert.equal(
+        (
+          await jsonRequest("/api/pi/skills/install", {
+            previewId: preview.id,
+            skillId: preview.skills[0]?.id,
+          })
+        ).status,
+        201,
+      );
+      const before = received.length;
+      const runId = await startChat("use-installed-skill");
+      await collect(readPiStream(await eventsFor(runId)));
+      const completed = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.equal(completed.run?.status, "completed", completed.run?.error ?? "");
+      const firstRequest = JSON.stringify(received[before]?.body);
+      assert.ok(
+        firstRequest.includes("integration-guide"),
+        "installed skill missing from model request",
+      );
+      assert.ok(!firstRequest.includes("ONLY_IN_FULL_SKILL_TEXT"));
+      const finalRequest = received.at(-1)?.body as {
+        messages: { role: string; content: unknown }[];
+      };
+      assert.ok(
+        JSON.stringify(finalRequest).includes("REFERENCE_CHECKLIST_CONTENT"),
+        JSON.stringify(
+          finalRequest.messages
+            .filter((message) => message.role === "tool")
+            .map((message) => message.content),
+        ),
+      );
+      const session = await getProjectSession(first.id);
+      assert.ok(session.getActiveToolNames().includes("read_skill"));
+      for (const tool of ["bash", "read", "write", "edit"])
+        assert.ok(!session.getActiveToolNames().includes(tool));
+      const history = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.deepEqual(history.messages.at(-1)?.skillReads, [
+        { name: "integration-guide", file: "SKILL.md" },
+        { name: "integration-guide", file: "references/checklist.md" },
+      ]);
+      const explicit = await startChat("/skill:integration-guide explain the steps");
+      await collect(readPiStream(await eventsFor(explicit)));
+      const request = received.at(-1)?.body as { messages: { role: string; content: unknown }[] };
+      const user = JSON.stringify(
+        request.messages.findLast((message) => message.role === "user")?.content,
+      );
+      assert.ok(user.includes("ONLY_IN_FULL_SKILL_TEXT") && user.includes("explain the steps"));
+      const commandOnly = await jsonRequest(chatPath, {
+        message: "/skill:integration-guide",
+        clientId,
+        requestId: crypto.randomUUID(),
+        selectedNodeIds: ["selected-node"],
+      });
+      assert.equal(commandOnly.status, 202);
+      const commandRun = (await commandOnly.json()) as { runId: string };
+      await collect(readPiStream(await eventsFor(commandRun.runId)));
+      const commandRequest = received.at(-1)?.body as {
+        messages: { role: string; content: unknown }[];
+      };
+      const commandUser = JSON.stringify(
+        commandRequest.messages.findLast((message) => message.role === "user")?.content,
+      );
+      assert.ok(
+        commandUser.includes("ONLY_IN_FULL_SKILL_TEXT") && commandUser.includes("selected-node"),
+      );
+      assert.equal(
+        (await jsonRequest("/api/pi/skills/integration-guide", { enabled: false }, "PATCH")).status,
+        200,
+      );
+      assert.equal(
+        (
+          await jsonRequest(chatPath, {
+            message: "/skill:integration-guide",
+            clientId,
+            requestId: crypto.randomUUID(),
+          })
+        ).status,
+        400,
+      );
+      await collect(readPiStream(await eventsFor(await startChat("after disabling skill"))));
+      assert.equal(session.resourceLoader.getSkills().skills.length, 0);
+    },
+  );
 });
 
 test("SSE parser handles UTF-8 split between chunks and detects a truncated response", async () => {

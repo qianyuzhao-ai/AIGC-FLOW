@@ -12,18 +12,33 @@ Base URL 和该服务的 API Key，再点击「读取模型」从其 `/models` �
 模型 ID 会原样传给聚合服务；没有模型列表接口时可手动填写。保存后可直接选择该服务，
 修改地址、模型和 Key。读取列表不会保存配置，留空 Key 只会沿用同一地址已保存的凭据。
 
-画布工具栏的 Pi 按钮打开对话侧栏。回复支持流式显示和停止，对话历史按项目保存，
-重新打开或重启应用后可查看历史。Agent 可以读取当前画布、创建文本／图片／视频节点、
+画布工具栏的 Pi 按钮打开对话侧栏。回复以左侧 AI、右侧用户气泡流式显示，支持停止。
+右上角可新建对话，旁边的历史按钮打开可搜索的会话列表。每条对话右侧的铅笔按钮可重命名，支持 Enter 保存、Esc 取消；
+手动名称不会被后续消息覆盖。每段对话有独立上下文，
+关闭侧栏或重启应用后仍可读取。Agent 可以读取当前画布、创建文本／图片／视频节点、
 修改提示词与生成参数、连接节点、排列、编组和解组。例如：
 
 - 「创建三个图片节点，分别填入以下提示词，再横向排列」
 - 「把这个图片节点连接到视频节点，生成一段视频」
 
 明确要求生成后，Agent 会按顺序调用现有图片／视频服务，每个指定节点生成一次，
-等待真实结果写回画布后继续。讨论创意不会直接修改或生成；当前只读取文本、参数与
-结构，不理解图片／视频内容。聚合服务需要支持工具调用；设置页的模型验证只验证文本回复。
+等待真实结果写回画布后继续。讨论创意不会直接修改或生成。
 
-工具操作与保存状态显示在聊天中，每次画布修改可以单独撤销。手动编辑造成冲突时，
+在画布单选或多选图片后，点击选区工具条的「添加到 chat」。附件自动去重，最多 9 张，
+可在输入区移除。聊天内只加载不超过 854×480 的等比缩略图，模型仍接收用于识别的图片内容。
+支持 PNG、JPEG、WebP、GIF，
+单张最多 10 MB、每次合计最多 20 MB；服务端检查并缩放后将实际图片内容交给模型。
+自定义视觉模型需要在设置中开启「此模型支持图片输入」。未附加的图片只提供节点信息，
+视频和音频不作为对话输入。图片会随 Pi 会话保存在本地，后续对话可以继续引用。
+聚合服务需要支持工具调用；设置页的模型验证只验证文本回复。
+
+聊天左侧边缘可向左拖宽，桌面最小宽度为 400px，最大为窗口一半；窄窗口会收缩最小宽度。
+分隔条支持左右方向键及 Home / End。AI 回复支持 Markdown 标题、列表、表格、引用和代码块。
+输入区下方显示当前模型和 Pi 估算的上下文用量；支持思考的模型可调整思考程度，发送后随会话保存。
+自定义推理模型需要开启「此模型支持思考程度调整」。模型不支持的等级不会显示。
+
+工具名称、执行状态和定位按钮显示在对应的 AI 气泡中，图片附件也可以点击定位。
+每次画布修改可以单独撤销。手动编辑造成冲突时，
 Agent 会重新读取；撤销不取消已提交的生成，也不撤销其结果。关闭侧栏或在应用内切换
 项目会继续运行。停止按钮阻止后续操作和生成提交，已提交给上游的生成会继续接收结果。
 
@@ -35,6 +50,10 @@ Pi 使用数据库所在目录下的 `pi/` 保存 `auth.json`、`models.json`、
 以及项目会话；不会使用用户独立安装的 Pi 配置。Web 开发时通常是
 `apps/server/data/pi/`，桌面端在应用用户数据目录的 `data/pi/`。不要提交该目录，
 也不要把配置文件中的凭据发到客户端。
+
+升级需要运行 `pnpm db:migrate` 应用 `0008`：新增会话索引并为任务关联会话。
+已有 Pi 会话继续显示为「历史对话」，不会清空。重命名功能需要迁移 `0009`，记录手动命名状态。
+桌面端启动时会自动执行迁移。
 
 旧 LLM 配置已移除。运行 `pnpm db:migrate` 会清除 SQLite 中旧的三个 LLM 配置项，
 需要在 Pi 模型中重新配置。内网素材上传和图片／视频生成仍使用原来的内网服务设置。
@@ -48,6 +67,23 @@ Pi 使用数据库所在目录下的 `pi/` 保存 `auth.json`、`models.json`、
 cd apps/server
 node --import tsx --test src/pi/*.test.ts ../client/src/lib/agent/*.test.ts
 ```
+
+## Pi 技能
+
+在「设置 → Pi 技能」上传 `.skill` / ZIP，或填写公开 GitHub 仓库、`tree` 目录、`blob/.../SKILL.md` 地址。
+预览会展示名称、说明、文件列表和安装位置；点击「确认安装」后才写入应用目录。同名技能不会被覆盖。
+GitHub 内容固定到预览时的 commit，安装使用同一份内容；私有仓库可先下载后作为本地包导入。
+分支名含斜杠时可使用 commit SHA 地址或将分支名中的斜杠编码为 `%2F`。
+
+技能包需要包含带 `name` 和 `description` YAML frontmatter 的 `SKILL.md`，以及所需参考资料。
+压缩包和技能解压内容合计各最多 20 MB，单文件最多 2 MB，单个技能最多 256 个文件，说明文件最多 64 KB。
+安装目录为数据库目录下的 `pi/skills/<name>/`，启停状态保存在 `pi/skill-registry.json`。
+它们独立于用户的 `~/.agents/skills` 和其他 Pi 安装，应用内所有项目共用。
+
+已启用技能从下一轮对话生效。模型根据说明按需读取，也可以点聊天输入区的「技能」按钮，
+或输入 `/skill:名称 你的需求` 显式调用。回复气泡中会记录读取过的技能文件。
+`read_skill` 只读取安装清单内的 UTF-8 文本；脚本和其他资源可随包保存，但不会运行脚本、加载扩展或访问包外文件。
+技能不能增加模型的工具权限。停用会移除后续加载入口，已经进入对话的内容仍会保留。
 
 ## 桌面项目标签页
 
@@ -69,6 +105,7 @@ Electron 桌面端使用 48px 全高标签栏，保留原生窗口控制。点�
 ```sh
 pnpm typecheck
 pnpm lint
+node --test .github/scripts/*.test.mjs apps/desktop/build/build-web.test.cjs
 pnpm --filter @aigc-flow/desktop test
 pnpm --filter @aigc-flow/server exec node --import tsx --test ../client/src/lib/graph.test.ts
 pnpm --filter @aigc-flow/desktop build:web
@@ -82,7 +119,7 @@ Electron 集成测试使用临时用户目录、内存项目 API 和模拟生成
 若构建环境限制 Turbopack 的子进程绑定端口，可以使用 Next.js 官方 webpack 构建器：
 
 ```sh
-DESKTOP=1 pnpm --filter @aigc-flow/client exec next build --webpack
+pnpm --filter @aigc-flow/desktop build:web --webpack
 ```
 
 Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实机确认。
@@ -96,13 +133,40 @@ Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实
    通过 PR 合并回 `dev`。
 2. 从 `dev` 发起到 `main` 的发布 PR，评审并合并后，在该 `main` 提交上创建版本标签
    （例如 `v0.2.0`），标签版本必须与包版本一致。
-3. 推送版本标签触发 `.github/workflows/release.yml`，分别构建 macOS arm64 / x64 的
-   DMG、ZIP，以及 Windows x64 的 EXE。也可以对已验证的提交手动运行该工作流。
-4. 两个平台构建成功后，在 Actions 中下载 `dist-macos-latest` 和 `dist-windows-latest`
-   产物，核对安装包版本并完成实机安装验证，再使用同一标签和更新说明发布 GitHub Release。
+3. 推送新的 `vX.Y.Z` 标签，触发 `.github/workflows/release.yml`。工作流先校验标签提交
+   已进入 `main`、五处包版本一致、对应更新说明存在且该版本未发布，再分别构建 macOS
+   arm64 / x64 的 DMG、ZIP，以及 Windows x64 的 EXE。
+4. 两个平台完成打包和运行检查后，统一将本轮的五个安装包及 SHA-256 校验和上传至
+   GitHub Release。更新说明取自 `CHANGELOG.md` 对应版本；附件全部上传后自动公开发布。
+   `vX.Y.Z-beta.1` 等带后缀的版本会标记为预发布。
 
-当前工作流只上传 Actions 构建产物，不会自动创建 GitHub Release；合并 `main` 本身也不会
-触发打包。只有版本标签或手动运行工作流才触发构建。
+正式发布只有标签 push 一个入口。合并 `main`、推送 `dev` / 功能分支和 PR 均不触发打包，
+也不提供 Actions 手动运行入口。GitHub 标签事件本身没有所属分支过滤，非 `main` 历史中的
+标签会启动校验，但不会进入打包和发布任务。不要强制移动、删除重建或复用发布标签；
+已发布版本的修复应递增版本号。
+
+构建失败时可以重跑失败的任务；上传中断会保留草稿，重跑发布任务会复用本轮构建产物，
+补齐附件后发布，不需要再手动打一轮包。Actions 中转产物保留 7 天；超过保留期后需要
+重跑完整流程。已公开发布的版本禁止覆盖附件。
+
+## 本地测试打包
+
+测试新功能时在功能分支本地打包，不创建发布标签，也不运行 GitHub Actions：
+
+```sh
+# macOS 主机：生成 Apple Silicon 和 Intel 安装包
+pnpm dist:mac
+
+# Windows 主机：生成 Windows x64 安装包
+pnpm dist:win
+
+# 检查当前主机架构的安装包运行依赖
+pnpm --filter @aigc-flow/desktop test:package
+```
+
+安装包位于 `apps/desktop/release/`。本地命令显式使用 `--publish never`，不会创建 Release
+或上传安装包；前端静态导出支持 macOS 和 Windows。常规功能测试无需每次都打完整安装包，
+可先用 `pnpm desktop` 调试。
 
 工作流在上传前使用打包后的 Electron 检查 SQLite 原生模块和 Pi SDK。检查会将应用归档
 复制到临时目录，防止仓库依赖掩盖漏包问题；不会访问用户数据库或调用模型。

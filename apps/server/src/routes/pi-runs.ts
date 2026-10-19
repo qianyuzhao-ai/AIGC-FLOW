@@ -1,4 +1,8 @@
-import { commandResultSchema, startAgentRunSchema } from "@aigc-flow/shared";
+import {
+  commandResultSchema,
+  renamePiConversationSchema,
+  startAgentRunSchema,
+} from "@aigc-flow/shared";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -15,8 +19,14 @@ import {
   stopRun,
   subscribeRun,
 } from "../pi/bridge";
+import {
+  createConversation,
+  getConversation,
+  listConversations,
+  renameConversation,
+} from "../pi/conversations";
 import { latestRun, snapshotRun, startRun } from "../pi/runs";
-import { readProjectMessages } from "../pi/sessions";
+import { readProjectMessages, readSessionInfo } from "../pi/sessions";
 
 const project = z.object({ projectId: z.coerce.number().int().positive() });
 const runParams = project.extend({ runId: z.string().min(1) });
@@ -37,22 +47,63 @@ export const piRunsRoute = new Hono()
       return c.json({ message: "运行不属于此项目" }, 404);
     await next();
   })
-  .get("/:projectId/messages", zValidator("param", project), async (c) => {
+  .get("/:projectId/conversations", zValidator("param", project), (c) =>
+    c.json({ conversations: listConversations(c.req.valid("param").projectId) }),
+  )
+  .patch(
+    "/:projectId/conversations/:conversationId",
+    zValidator("param", project.extend({ conversationId: z.string().min(1) })),
+    zValidator("json", renamePiConversationSchema),
+    (c) => {
+      const { projectId, conversationId } = c.req.valid("param");
+      return c.json(renameConversation(projectId, conversationId, c.req.valid("json").title));
+    },
+  )
+  .get(
+    "/:projectId/session-info",
+    zValidator("param", project),
+    zValidator("query", z.object({ conversationId: z.string().min(1).optional() })),
+    async (c) =>
+      c.json(
+        await readSessionInfo(c.req.valid("param").projectId, c.req.valid("query").conversationId),
+      ),
+  )
+  .post("/:projectId/conversations", zValidator("param", project), (c) => {
     const { projectId } = c.req.valid("param");
-    const run = latestRun(projectId);
-    return c.json({
-      messages: await readProjectMessages(projectId),
-      run: run ? runView(run.id) : null,
-      commands: run ? commandViews(run.id) : [],
-    });
+    if (latestRun(projectId)?.status === "running")
+      return c.json({ message: "请先停止当前任务" }, 409);
+    return c.json(createConversation(projectId), 201);
   })
+  .get(
+    "/:projectId/messages",
+    zValidator("param", project),
+    zValidator("query", z.object({ conversationId: z.string().min(1).optional() })),
+    async (c) => {
+      const { projectId } = c.req.valid("param");
+      const conversation = getConversation(projectId, c.req.valid("query").conversationId);
+      const run = latestRun(projectId, conversation.id);
+      return c.json({
+        conversationId: conversation.id,
+        conversations: listConversations(projectId),
+        messages: await readProjectMessages(projectId, conversation.id),
+        run: run ? runView(run.id) : null,
+        commands: run ? commandViews(run.id) : [],
+      });
+    },
+  )
   .post(
     "/:projectId/messages",
     zValidator("param", project),
     zValidator("json", startAgentRunSchema),
-    (c) => {
-      const id = startRun(c.req.valid("param").projectId, c.req.valid("json"));
-      return c.json({ runId: id }, 202);
+    async (c) => {
+      const id = await startRun(
+        c.req.valid("param").projectId,
+        c.req.valid("json"),
+        c.req.raw.signal,
+      );
+      const run = getRun(id);
+      if (!run?.conversationId) throw new Error("运行没有关联对话");
+      return c.json({ runId: id, conversationId: run.conversationId }, 202);
     },
   )
   .get(

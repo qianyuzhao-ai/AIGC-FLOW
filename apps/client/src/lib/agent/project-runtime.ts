@@ -6,17 +6,31 @@ import {
   canvasToolSchemas,
   type GenerationJobView,
   generationJobViewSchema,
+  MAX_PI_IMAGES,
   type PiChatMessage,
+  type PiConversation,
+  type PiImageAttachment,
+  type PiSessionInfo,
+  type PiSkill,
+  type PiThinkingLevel,
 } from "@aigc-flow/shared";
 import { api } from "../api";
 import { apiError } from "../api-error";
 import { beginDesktopTask } from "../desktop-tasks";
 import { toPersistedGraph } from "../graph";
+import { nodeMediaOf } from "../node-media";
 import { readPiStream } from "../pi-stream";
 import { applyCanvasTool, type CanvasBinding } from "./canvas-tools";
 import { generationRequest } from "./generation-input";
 
 type View = {
+  skills: PiSkill[];
+  chatOpen: boolean;
+  draftImages: PiImageAttachment[];
+  sessionInfo: PiSessionInfo | null;
+  thinkingLevel?: PiThinkingLevel;
+  conversationId: string | null;
+  conversations: PiConversation[];
   messages: PiChatMessage[];
   run: AgentRunView | null;
   commands: AgentCommandView[];
@@ -25,6 +39,12 @@ type View = {
   error: string;
 };
 const initial: View = {
+  skills: [],
+  chatOpen: false,
+  draftImages: [],
+  sessionInfo: null,
+  conversationId: null,
+  conversations: [],
   messages: [],
   run: null,
   commands: [],
@@ -82,15 +102,126 @@ export class ProjectRuntime {
   focus(ids: string[]) {
     this.binding?.focus(ids);
   }
-  async load() {
+  setChatOpen = (chatOpen: boolean) => this.patch({ chatOpen });
+  addChatImages(nodeIds: string[]) {
+    if (this.view.loading) throw new Error("正在处理请求，请稍后添加图片");
+    const available = this.canvasImages();
+    const images = new Map(this.view.draftImages.map((image) => [image.nodeId, image]));
+    for (const id of nodeIds) {
+      const image = available.find((item) => item.nodeId === id);
+      if (!image) throw new Error("所选图片尚未就绪或已不存在");
+      images.set(id, image);
+    }
+    if (images.size > MAX_PI_IMAGES) throw new Error(`每条消息最多添加 ${MAX_PI_IMAGES} 张图片`);
+    this.patch({ draftImages: [...images.values()], chatOpen: true, error: "" });
+  }
+  removeChatImage(nodeId: string) {
+    this.patch({ draftImages: this.view.draftImages.filter((image) => image.nodeId !== nodeId) });
+  }
+  setThinkingLevel(thinkingLevel: PiThinkingLevel) {
+    if (this.view.sessionInfo?.thinkingLevels.includes(thinkingLevel))
+      this.patch({ thinkingLevel });
+  }
+  async refreshSessionInfo() {
+    const conversationId = this.view.conversationId;
+    try {
+      const response = await api.api.pi.projects[":projectId"]["session-info"].$get({
+        param: { projectId: String(this.projectId) },
+        query: { conversationId: conversationId ?? undefined },
+      });
+      if (!response.ok) throw await apiError(response);
+      const sessionInfo = await response.json();
+      if (this.view.conversationId !== conversationId) return;
+      const sameModel =
+        sessionInfo.model?.id === this.view.sessionInfo?.model?.id &&
+        sessionInfo.model?.provider === this.view.sessionInfo?.model?.provider;
+      this.patch({
+        sessionInfo,
+        thinkingLevel:
+          sameModel &&
+          this.view.thinkingLevel &&
+          sessionInfo.thinkingLevels.includes(this.view.thinkingLevel)
+            ? this.view.thinkingLevel
+            : undefined,
+      });
+    } catch (error) {
+      if (this.view.conversationId === conversationId)
+        this.patch({ error: error instanceof Error ? error.message : "读取模型信息失败" });
+    }
+  }
+  async refreshSkills() {
+    try {
+      const response = await api.api.pi.skills.$get();
+      if (!response.ok) throw await apiError(response);
+      this.patch({ skills: (await response.json()).skills.filter((skill) => skill.enabled) });
+    } catch (error) {
+      this.patch({ error: error instanceof Error ? error.message : "读取技能列表失败" });
+    }
+  }
+  canvasImages(): PiImageAttachment[] {
+    return this.canvas()
+      .read()
+      .nodes.flatMap((node) => {
+        const media = nodeMediaOf(node);
+        return media?.kind === "image"
+          ? [
+              {
+                nodeId: node.id,
+                label: String(node.data.label ?? "图片"),
+                url: media.url,
+              },
+            ]
+          : [];
+      });
+  }
+  async newConversation() {
+    if (this.view.loading || this.view.run?.status === "running") return;
+    this.patch({ loading: true, error: "" });
+    try {
+      const response = await api.api.pi.projects[":projectId"].conversations.$post({
+        param: { projectId: String(this.projectId) },
+      });
+      if (!response.ok) throw await apiError(response);
+      const conversation = await response.json();
+      this.patch({ loading: false });
+      await this.load(conversation.id);
+    } catch (error) {
+      this.patch({
+        loading: false,
+        error: error instanceof Error ? error.message : "创建对话失败",
+      });
+    }
+  }
+  async renameConversation(conversationId: string, title: string) {
+    const response = await api.api.pi.projects[":projectId"].conversations[
+      ":conversationId"
+    ].$patch({
+      param: { projectId: String(this.projectId), conversationId },
+      json: { title },
+    });
+    if (!response.ok) throw await apiError(response);
+    const conversation = await response.json();
+    this.patch({
+      conversations: this.view.conversations.map((item) =>
+        item.id === conversation.id ? conversation : item,
+      ),
+    });
+  }
+  async load(conversationId = this.view.conversationId) {
+    if (this.view.loading || this.view.run?.status === "running") return;
     this.patch({ loading: true, error: "" });
     try {
       const res = await api.api.pi.projects[":projectId"].messages.$get({
         param: { projectId: String(this.projectId) },
+        query: { conversationId: conversationId ?? undefined },
       });
       if (!res.ok) throw await apiError(res);
       const value = await res.json();
-      this.patch(value);
+      const switching =
+        this.view.conversationId !== null && this.view.conversationId !== value.conversationId;
+      this.patch({ ...value, ...(switching ? { draftImages: [], thinkingLevel: undefined } : {}) });
+      void this.refreshSessionInfo();
+      void this.refreshSkills();
       if (value.run?.status === "running") void this.connect(value.run.id);
     } catch (error) {
       this.patch({ error: error instanceof Error ? error.message : "读取对话失败" });
@@ -98,7 +229,8 @@ export class ProjectRuntime {
       this.patch({ loading: false });
     }
   }
-  async send(message: string) {
+  async send(message: string, imageNodeIds: string[] = []) {
+    if (this.view.loading) throw new Error("正在处理请求");
     if (this.view.run?.status === "running") throw new Error("当前项目仍有任务运行");
     const selectedNodeIds = this.canvas()
       .read()
@@ -106,13 +238,43 @@ export class ProjectRuntime {
       .map((node) => node.id);
     this.patch({ loading: true, error: "" });
     try {
+      const attachments = imageNodeIds.map((id) => {
+        const image = this.canvasImages().find((item) => item.nodeId === id);
+        if (!image) throw new Error("选择的图片已不可用，请重新选择");
+        return image;
+      });
+      if (attachments.length && !(await this.canvas().save()))
+        throw new Error("画布保存失败，图片尚未发送");
       const res = await api.api.pi.projects[":projectId"].messages.$post({
         param: { projectId: String(this.projectId) },
-        json: { message, clientId: this.clientId, requestId: crypto.randomUUID(), selectedNodeIds },
+        json: {
+          message,
+          clientId: this.clientId,
+          requestId: crypto.randomUUID(),
+          selectedNodeIds,
+          conversationId: this.view.conversationId ?? undefined,
+          imageNodeIds,
+          thinkingLevel: this.view.thinkingLevel ?? this.view.sessionInfo?.thinkingLevel,
+        },
       });
       if (!res.ok) throw await apiError(res);
-      const { runId } = await res.json();
+      const { runId, conversationId } = await res.json();
       this.patch({
+        conversationId,
+        draftImages: [],
+        commands: [],
+        messages: [
+          ...this.view.messages,
+          { id: `${runId}-user`, role: "user", text: message, runId, attachments, commands: [] },
+          {
+            id: `${runId}-assistant`,
+            role: "assistant",
+            text: "",
+            runId,
+            attachments: [],
+            commands: [],
+          },
+        ],
         run: {
           id: runId,
           projectId: this.projectId,
@@ -120,6 +282,7 @@ export class ProjectRuntime {
           status: "running",
           error: null,
           partial: "",
+          conversationId,
         },
       });
       this.activeFinish?.();
@@ -151,7 +314,12 @@ export class ProjectRuntime {
             continue;
           }
           if (event.type !== "state") continue;
-          this.patch({ ...event, error: event.run?.error ?? "" });
+          this.patch({
+            messages: event.messages,
+            run: event.run,
+            commands: event.commands,
+            error: event.run?.error ?? "",
+          });
           if (event.run?.clientId === this.clientId && event.run.status === "running") {
             for (const command of event.commands.filter((item) => item.status === "pending"))
               void this.deliver(command);
@@ -159,6 +327,8 @@ export class ProjectRuntime {
           if (event.run?.status !== "running") {
             this.activeFinish?.();
             this.activeFinish = undefined;
+            void this.refreshConversations();
+            void this.refreshSessionInfo();
             return;
           }
         }
@@ -169,6 +339,17 @@ export class ProjectRuntime {
         });
       }
       await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+  async refreshConversations() {
+    try {
+      const response = await api.api.pi.projects[":projectId"].conversations.$get({
+        param: { projectId: String(this.projectId) },
+      });
+      if (!response.ok) throw await apiError(response);
+      this.patch(await response.json());
+    } catch (error) {
+      this.patch({ error: error instanceof Error ? error.message : "读取历史对话失败" });
     }
   }
   async stop() {

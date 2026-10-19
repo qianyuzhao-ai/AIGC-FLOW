@@ -8,25 +8,13 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { getAppSettings } from "../db/settings";
+import { isAllowedMediaSource } from "../lib/media-source";
 import { storeFile } from "../uploads/storage";
 
 const downloadQuerySchema = z.object({
   url: z.url(),
   filename: z.string().min(1).max(255),
 });
-
-/**
- * 只放行内网上传/生产服务产出的素材地址（都在百度云 bcebos.com 的桶上），
- * 防止这个接口被当成任意 URL 的代理。
- */
-function isAllowedSource(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return protocol === "https:" && (hostname === "bcebos.com" || hostname.endsWith(".bcebos.com"));
-  } catch {
-    return false;
-  }
-}
 
 function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1024 / 1024)}MB`;
@@ -100,7 +88,7 @@ export const uploadsRoute = new Hono()
   .get("/download", zValidator("query", downloadQuerySchema), async (c) => {
     const { url, filename } = c.req.valid("query");
 
-    if (!isAllowedSource(url)) {
+    if (!isAllowedMediaSource(url)) {
       return c.json({ message: "只允许下载本服务托管的素材" }, 400);
     }
 

@@ -99,6 +99,7 @@ export const agentRunViewSchema = z.object({
   status: agentRunStatusSchema,
   error: z.string().nullable(),
   partial: z.string(),
+  conversationId: z.string().nullable().optional(),
 });
 export const agentCommandViewSchema = canvasCommandSchema.extend({
   status: z.enum(["pending", "completed", "failed", "cancelled", "unknown"]),
@@ -107,11 +108,25 @@ export const agentCommandViewSchema = canvasCommandSchema.extend({
 });
 export type AgentRunView = z.infer<typeof agentRunViewSchema>;
 export type AgentCommandView = z.infer<typeof agentCommandViewSchema>;
+export const MAX_PI_IMAGES = 9;
+export const piThinkingLevelSchema = z.enum([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+export type PiThinkingLevel = z.infer<typeof piThinkingLevelSchema>;
 export const startAgentRunSchema = z.object({
   message: z.string().trim().min(1).max(32000),
   requestId: id,
   clientId: id,
   selectedNodeIds: z.array(id).max(500).default([]),
+  conversationId: id.optional(),
+  imageNodeIds: z.array(id).max(MAX_PI_IMAGES).default([]),
+  thinkingLevel: piThinkingLevelSchema.optional(),
 });
 export const commandResultSchema = z.object({ clientId: id, result: canvasReceiptSchema });
 export const generationJobRequestSchema = z.discriminatedUnion("kind", [

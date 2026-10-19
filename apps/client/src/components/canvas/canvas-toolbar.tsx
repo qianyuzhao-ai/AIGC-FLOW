@@ -4,7 +4,8 @@ import { NODE_MARK_LABEL, type NodeMark, type Project } from "@aigc-flow/shared"
 import { ChevronLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { useState } from "react";
+import { type RefObject, useSyncExternalStore } from "react";
+import { useProjectAgent } from "@/components/agent-workspace";
 import { ProjectName } from "@/components/canvas/project-name";
 import { SaveIndicator } from "@/components/canvas/save-indicator";
 import { PiChat, piChatTransition } from "@/components/pi-chat";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SaveStatus } from "@/hooks/use-graph-autosave";
+import { usePiChatResize } from "@/hooks/use-pi-chat-resize";
 import { useDesktopWorkspace } from "@/lib/desktop";
 import type { MarkSummary } from "@/lib/node-mark";
 import { cn } from "@/lib/utils";
@@ -148,20 +150,40 @@ export function CanvasInfoGroup({
   );
 }
 
-export function CanvasActionGroup({ projectId }: { projectId: number }) {
-  const [chatOpen, setChatOpen] = useState(false);
+export function CanvasActionGroup({
+  projectId,
+  paletteRef,
+  controlsRef,
+}: {
+  projectId: number;
+  paletteRef: RefObject<HTMLDivElement | null>;
+  controlsRef: RefObject<HTMLDivElement | null>;
+}) {
+  const runtime = useProjectAgent(projectId);
+  const chatOpen = useSyncExternalStore(
+    runtime.subscribe,
+    () => runtime.getSnapshot().chatOpen,
+    () => false,
+  );
   const reducedMotion = useReducedMotion();
   const transition = piChatTransition(chatOpen, reducedMotion);
+  const resize = usePiChatResize(chatOpen, paletteRef, controlsRef, transition);
   return (
     <div
+      ref={resize.toolbarRef}
       className={cn(GROUP, "transition-transform motion-reduce:transition-none")}
       style={{
-        transform: chatOpen ? "translateX(calc(-1 * var(--pi-chat-width)))" : "translateX(0)",
+        transform: chatOpen ? `translateX(-${resize.width}px)` : "translateX(0)",
         transitionDuration: `${transition.duration}s`,
         transitionTimingFunction: `cubic-bezier(${transition.ease.join(",")})`,
       }}
     >
-      <PiChat projectId={projectId} open={chatOpen} onOpenChange={setChatOpen} />
+      <PiChat
+        projectId={projectId}
+        open={chatOpen}
+        onOpenChange={runtime.setChatOpen}
+        resize={resize}
+      />
       <StatsDialog projectId={projectId} />
       <ThemeToggle />
       <SettingsDialog />

@@ -36,6 +36,8 @@ export function SettingsPiSection() {
     useState<NonNullable<PiConnection["custom"]>["api"]>("openai-completions");
   const [contextWindow, setContextWindow] = useState(32768);
   const [maxTokens, setMaxTokens] = useState(4096);
+  const [supportsImages, setSupportsImages] = useState(false);
+  const [reasoning, setReasoning] = useState(false);
   const [remoteModels, setRemoteModels] = useState<PiModelOption[]>([]);
   const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState<"load" | "save" | "verify" | "models" | null>("load");
@@ -60,6 +62,8 @@ export function SettingsPiSection() {
       const metadata = value?.models.find((item) => item.id === modelId);
       setContextWindow(metadata?.contextWindow ?? 32768);
       setMaxTokens(metadata?.maxTokens ?? 4096);
+      setSupportsImages(metadata?.input.includes("image") ?? false);
+      setReasoning(metadata?.reasoning ?? false);
       setApiKey("");
       setClearApiKey(false);
       setRemoteModels([]);
@@ -102,6 +106,8 @@ export function SettingsPiSection() {
     const metadata = selected?.models.find((item) => item.id === value);
     setContextWindow(metadata?.contextWindow ?? 32768);
     setMaxTokens(metadata?.maxTokens ?? 4096);
+    setSupportsImages(metadata?.input.includes("image") ?? false);
+    setReasoning(metadata?.reasoning ?? false);
   }
 
   async function save(event: FormEvent) {
@@ -115,7 +121,17 @@ export function SettingsPiSection() {
       apiKey,
       clearApiKey,
       ...(custom
-        ? { custom: { name: serviceName, baseUrl, api: protocol, contextWindow, maxTokens } }
+        ? {
+            custom: {
+              name: serviceName,
+              baseUrl,
+              api: protocol,
+              contextWindow,
+              maxTokens,
+              input: supportsImages ? ["text", "image"] : ["text"],
+              reasoning,
+            },
+          }
         : {}),
     });
     if (!parsed.success) {
@@ -133,6 +149,7 @@ export function SettingsPiSection() {
         value.model,
       );
       setNotice("Pi 模型配置已保存");
+      window.dispatchEvent(new Event("pi-configuration-changed"));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存失败");
     } finally {
@@ -433,6 +450,33 @@ export function SettingsPiSection() {
                 />
               </SettingsField>
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={supportsImages}
+                disabled={disabled}
+                onChange={(event) => {
+                  setSupportsImages(event.target.checked);
+                  setNotice("");
+                }}
+              />
+              此模型支持图片输入
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={reasoning}
+                disabled={disabled}
+                onChange={(event) => {
+                  setReasoning(event.target.checked);
+                  setNotice("");
+                }}
+              />
+              此模型支持思考程度调整
+            </label>
+            <p className="text-muted-foreground text-xs">
+              图片输入仅适用于视觉模型，思考调整需服务支持推理参数。视频和音频不作为对话输入。
+            </p>
             <p className="text-muted-foreground text-xs">
               新模型的初始值仅作起点，模型列表不一定提供这些限制。
             </p>

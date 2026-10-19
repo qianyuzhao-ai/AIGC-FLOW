@@ -1,0 +1,1 @@
+ALTER TABLE `agent_conversations` ADD `title_customized` integer DEFAULT false NOT NULL;
