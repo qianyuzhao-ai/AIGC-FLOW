@@ -10,6 +10,7 @@ import { getConversation, legacyConversationId, touchConversation } from "./conv
 import { loadImages, selectedImages } from "./images";
 import { recoverInterruptedWork } from "./recovery";
 import { getProjectSession, readProjectMessages } from "./sessions";
+import { assertSkillCommand, refreshSessionSkills } from "./skills/resources";
 export function latestRun(projectId: number, conversationId?: string) {
   recoverInterruptedWork();
   return db
@@ -56,6 +57,7 @@ export async function startRun(
     selectedNodeIds: input.selectedNodeIds,
     conversationId: conversation.id,
     imageNodeIds: input.imageNodeIds,
+    thinkingLevel: input.thinkingLevel,
   });
   const existingRequest = () => {
     const existing = db
@@ -73,9 +75,15 @@ export async function startRun(
     ? selectedImages(projectId, input.imageNodeIds)
     : [];
   const model = await getConfiguredModel();
+  if (input.thinkingLevel) {
+    const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+    if (!getSupportedThinkingLevels(model).includes(input.thinkingLevel))
+      throw new Error("当前模型不支持这个思考等级，请刷新模型信息后重试");
+  }
   if (attachments.length && !model.input.includes("image"))
     throw new Error("当前 Pi 模型未启用图片输入，请选择视觉模型，或在自定义模型设置中开启图片输入");
   const images = await loadImages(attachments, signal);
+  assertSkillCommand(input.message);
   signal?.throwIfAborted();
   const submittedWhileLoading = existingRequest();
   if (submittedWhileLoading) return submittedWhileLoading;
@@ -106,8 +114,11 @@ export async function startRun(
       const session = await getProjectSession(projectId, conversation.id);
       await session.waitForIdle();
       if (getRun(id)?.status !== "running") return;
+      await refreshSessionSkills(session);
+      assertSkillCommand(input.message);
       live.abort = () => session.abort();
       await session.setModel(model);
+      if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
       if (getRun(id)?.status !== "running") return;
       session.sessionManager.appendCustomEntry("aigc-flow-turn", {
         runId: id,
@@ -141,7 +152,8 @@ export async function startRun(
         const imageContext = attachments.length
           ? `\n\n[附图按顺序对应节点：${attachments.map((image) => image.nodeId).join(", ")}。仅这些附图可用于视觉分析。]`
           : "";
-        await session.prompt(input.message + selection + imageContext, { images });
+        const message = input.message.replace(/^\/skill:(\S+)(?:\s+|$)/, "/skill:$1 ");
+        await session.prompt(message + selection + imageContext, { images });
         live.partial = "";
         finishRun(id, modelError ? "failed" : "completed", modelError);
       } finally {

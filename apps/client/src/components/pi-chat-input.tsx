@@ -1,10 +1,23 @@
 "use client";
 
-import type { PiImageAttachment } from "@aigc-flow/shared";
-import { ArrowUp, Square, X } from "lucide-react";
+import {
+  MAX_PI_IMAGES,
+  type PiImageAttachment,
+  type PiSessionInfo,
+  type PiSkill,
+  type PiThinkingLevel,
+} from "@aigc-flow/shared";
+import { ArrowUp, BookOpen, Square, X } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
-import { PiImagePicker } from "@/components/pi-image-picker";
+import { PiChatStatus } from "@/components/pi-chat-status";
+import { PiThumbnail } from "@/components/pi-thumbnail";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectRuntime } from "@/lib/agent/project-runtime";
 
@@ -13,14 +26,21 @@ export function PiChatInput({
   busy,
   loading,
   error,
+  images,
+  sessionInfo,
+  thinkingLevel,
+  skills,
 }: {
   runtime: ProjectRuntime;
   busy: boolean;
   loading: boolean;
   error: string;
+  images: PiImageAttachment[];
+  sessionInfo: PiSessionInfo | null;
+  thinkingLevel?: PiThinkingLevel;
+  skills: PiSkill[];
 }) {
   const [draft, setDraft] = useState("");
-  const [images, setImages] = useState<PiImageAttachment[]>([]);
   const input = useRef<HTMLTextAreaElement>(null);
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -31,7 +51,6 @@ export function PiChatInput({
         images.map((image) => image.nodeId),
       );
       setDraft("");
-      setImages([]);
       input.current?.focus({ preventScroll: true });
     } catch {
       // Runtime exposes the error; keep the draft and attachments for retry.
@@ -49,10 +68,9 @@ export function PiChatInput({
           <div className="flex gap-2 overflow-x-auto p-1">
             {images.map((image, index) => (
               <div key={image.nodeId} className="relative w-16 shrink-0">
-                {/* biome-ignore lint/performance/noImgElement: 展示用户选中的画布图片。 */}
-                <img
-                  src={image.url}
-                  alt={image.label}
+                <PiThumbnail
+                  url={image.url}
+                  label={image.label}
                   className="size-16 rounded-md object-cover"
                 />
                 <Button
@@ -62,7 +80,7 @@ export function PiChatInput({
                   className="absolute top-0 right-0"
                   disabled={loading}
                   aria-label={`移除图片：${image.label}`}
-                  onClick={() => setImages(images.filter((item) => item.nodeId !== image.nodeId))}
+                  onClick={() => runtime.removeChatImage(image.nodeId)}
                 >
                   <X />
                 </Button>
@@ -82,7 +100,8 @@ export function PiChatInput({
           value={draft}
           disabled={loading}
           maxLength={32000}
-          placeholder="描述你的想法，或选择图片提问…"
+          placeholder="描述你的想法，或从画布添加图片…"
+          onFocus={() => void runtime.refreshSessionInfo()}
           className="min-h-20 max-h-40 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -93,12 +112,51 @@ export function PiChatInput({
           }}
         />
         <div className="flex items-center justify-between gap-2">
-          <PiImagePicker
-            runtime={runtime}
-            value={images}
-            onChange={setImages}
-            disabled={busy || loading}
-          />
+          <div className="flex items-center gap-1">
+            {skills.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={loading}
+                    aria-label="使用技能"
+                  >
+                    <BookOpen />
+                    技能
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  className="max-h-72 w-72 overflow-y-auto"
+                >
+                  {skills.map((skill) => (
+                    <DropdownMenuItem
+                      key={skill.name}
+                      className="flex-col items-start"
+                      onSelect={() => {
+                        setDraft(
+                          (current) =>
+                            `/skill:${skill.name} ${current.replace(/^\/skill:\S+\s*/, "")}`,
+                        );
+                        requestAnimationFrame(() => input.current?.focus());
+                      }}
+                    >
+                      <span>{skill.name}</span>
+                      <span className="line-clamp-2 text-muted-foreground text-xs">
+                        {skill.description}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <span className="px-2 text-muted-foreground text-xs">
+              画布选图 · {images.length}/{MAX_PI_IMAGES}
+            </span>
+          </div>
           {busy ? (
             <Button
               type="button"
@@ -123,7 +181,12 @@ export function PiChatInput({
           )}
         </div>
       </div>
-      <p className="text-center text-muted-foreground text-xs">Enter 发送 · Shift+Enter 换行</p>
+      <PiChatStatus
+        info={sessionInfo}
+        thinkingLevel={thinkingLevel}
+        disabled={busy || loading}
+        onThinkingChange={(level) => runtime.setThinkingLevel(level)}
+      />
     </form>
   );
 }

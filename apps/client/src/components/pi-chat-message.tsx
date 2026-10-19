@@ -6,11 +6,14 @@ import {
   type GenerationJobView,
   type PiChatMessage,
 } from "@aigc-flow/shared";
-import { CircleCheck, CircleX, Crosshair, LoaderCircle, Wrench } from "lucide-react";
+import { BookOpen, CircleCheck, CircleX, Crosshair, LoaderCircle, Wrench } from "lucide-react";
+import { PiMarkdown } from "@/components/pi-markdown";
+import { PiThumbnail } from "@/components/pi-thumbnail";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { commandNodeIds } from "@/lib/agent/command-node-ids";
+import { cn } from "@/lib/utils";
 
 const statuses = {
   pending: "执行中",
@@ -124,7 +127,12 @@ export function PiChatMessageRow({
         >
           <BubbleContent className="space-y-3">
             {message.attachments.length > 0 && (
-              <div className="grid grid-cols-2 gap-2">
+              <div
+                className={cn(
+                  "grid max-w-sm gap-2",
+                  message.attachments.length > 2 ? "grid-cols-3" : "grid-cols-2",
+                )}
+              >
                 {message.attachments.map((image, index) => (
                   <button
                     key={image.nodeId}
@@ -133,12 +141,10 @@ export function PiChatMessageRow({
                     onClick={() => onFocus([image.nodeId])}
                     aria-label={`定位图片 ${index + 1}：${image.label}`}
                   >
-                    {/* biome-ignore lint/performance/noImgElement: 画布媒体 URL 使用原始缩略图，不经过 Next 图像代理。 */}
-                    <img
-                      src={image.url}
-                      alt={image.label}
-                      loading="lazy"
-                      className="aspect-square w-full rounded-t-md object-cover"
+                    <PiThumbnail
+                      url={image.url}
+                      label={image.label}
+                      className="aspect-video w-full rounded-t-md bg-muted object-contain"
                     />
                     <span className="flex items-center gap-1 p-1.5 text-xs text-foreground">
                       <Crosshair className="size-3 shrink-0" />
@@ -150,13 +156,33 @@ export function PiChatMessageRow({
                 ))}
               </div>
             )}
-            {text && <p className="whitespace-pre-wrap break-words leading-relaxed">{text}</p>}
+            {text &&
+              (human ? (
+                <p className="whitespace-pre-wrap break-words leading-relaxed">{text}</p>
+              ) : (
+                <PiMarkdown text={text} />
+              ))}
             {commands.length > 0 && (
               <section className="space-y-2" aria-label="本轮画布工具">
                 {commands.map((command) => (
                   <ToolResult key={command.id} command={command} jobs={jobs} onFocus={onFocus} />
                 ))}
               </section>
+            )}
+            {message.skillReads && message.skillReads.length > 0 && (
+              <details className="rounded-md border bg-background/50 p-2 text-xs">
+                <summary className="flex cursor-pointer items-center gap-2">
+                  <BookOpen className="size-3.5" />
+                  已读取技能资料 · {message.skillReads.length}
+                </summary>
+                <ul className="mt-2 space-y-1 text-muted-foreground">
+                  {message.skillReads.map((read) => (
+                    <li key={`${read.name}/${read.file}`} className="break-all">
+                      {read.name} / {read.file}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
             {streaming && (
               <p role="status" className="flex items-center gap-2 text-muted-foreground text-xs">

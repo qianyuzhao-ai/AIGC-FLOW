@@ -71,6 +71,7 @@ import {
   spaceNodes,
 } from "@/lib/layout";
 import { idsByMark, markableIds, markNodes, markSummary } from "@/lib/node-mark";
+import { nodeMediaOf } from "@/lib/node-media";
 import { AnimatedEdge } from "./animated-edge";
 import { CanvasControls } from "./canvas-controls";
 import { CanvasActionGroup, CanvasInfoGroup } from "./canvas-toolbar";
@@ -186,6 +187,8 @@ export function CanvasEditor({
   // 必须显式把主题传给它的 colorMode，否则暗色下节点是白底白字，完全看不见
   const { resolvedTheme } = useTheme();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const paletteRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
   // 连续粘贴同一份剪贴板时逐次错开：记住粘了几次，以及粘的是哪一份（换了就归零）
   const pasteCountRef = useRef(0);
   const pasteSourceRef = useRef<string | null>(null);
@@ -621,6 +624,21 @@ export function CanvasEditor({
     [nodes, mediaTargetIds],
   );
 
+  const chatImageIds = useMemo(
+    () =>
+      nodes
+        .filter((node) => mediaTargetIds.includes(node.id) && nodeMediaOf(node)?.kind === "image")
+        .map((node) => node.id),
+    [nodes, mediaTargetIds],
+  );
+  const handleAddToChat = () => {
+    try {
+      agent.addChatImages(chatImageIds);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "添加图片失败");
+    }
+  };
+
   const markCount = useMemo(
     () => markableIds(nodes, mediaTargetIds).length,
     [nodes, mediaTargetIds],
@@ -944,6 +962,8 @@ export function CanvasEditor({
             />
 
             <SelectionToolbar
+              chatImageCount={chatImageIds.length}
+              onAddToChat={handleAddToChat}
               selectedIds={selectedIds}
               groupId={groupId}
               canGroup={canGroup}
@@ -970,29 +990,41 @@ export function CanvasEditor({
             </Panel>
 
             <Panel position="top-right">
-              <CanvasActionGroup projectId={project.id} />
+              <CanvasActionGroup
+                projectId={project.id}
+                paletteRef={paletteRef}
+                controlsRef={controlsRef}
+              />
             </Panel>
 
             <Panel position="bottom-center">
-              <NodePalette
-                mode={mode}
-                onModeChange={setMode}
-                onAddImageGen={handleAddImageGen}
-                onAddVideoGen={handleAddVideoGen}
-                onAddText={handleAddText}
-                onPickFiles={handlePickFiles}
-                canUndo={history.canUndo}
-                canRedo={history.canRedo}
-                onUndo={() => applySnapshot(history.undo())}
-                onRedo={() => applySnapshot(history.redo())}
-              />
+              <div
+                ref={paletteRef}
+                data-canvas-palette=""
+                className="rounded-xl transition-transform motion-reduce:transition-none"
+              >
+                <NodePalette
+                  mode={mode}
+                  onModeChange={setMode}
+                  onAddImageGen={handleAddImageGen}
+                  onAddVideoGen={handleAddVideoGen}
+                  onAddText={handleAddText}
+                  onPickFiles={handlePickFiles}
+                  canUndo={history.canUndo}
+                  canRedo={history.canRedo}
+                  onUndo={() => applySnapshot(history.undo())}
+                  onRedo={() => applySnapshot(history.redo())}
+                />
+              </div>
             </Panel>
 
             <Panel position="bottom-left">
-              <CanvasControls
-                showMiniMap={showMiniMap}
-                onToggleMiniMap={() => setShowMiniMap((value) => !value)}
-              />
+              <div ref={controlsRef} data-canvas-controls="">
+                <CanvasControls
+                  showMiniMap={showMiniMap}
+                  onToggleMiniMap={() => setShowMiniMap((value) => !value)}
+                />
+              </div>
             </Panel>
             {/* marginBottom 抬到控制条上方，两个面板同在左下角 */}
             {showMiniMap && (

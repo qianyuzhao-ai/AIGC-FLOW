@@ -1,15 +1,25 @@
 import { piConnectionSchema, piModelsRequestSchema } from "@aigc-flow/shared";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
+import { z } from "zod";
 import { getConfiguredModel, getPiConfiguration, savePiConfiguration } from "../pi/configuration";
+import { imageThumbnail } from "../pi/images";
 import { discoverPiModels } from "../pi/model-discovery";
 import { getPiRuntime } from "../pi/runtime";
 import { piRunsRoute } from "./pi-runs";
+import { piSkillsRoute } from "./pi-skills";
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Pi 请求失败");
 
 export const piRoute = new Hono()
   .onError((error, c) => c.json({ message: errorMessage(error) }, 400))
+  .get("/thumbnail", zValidator("query", z.object({ url: z.url().max(8000) })), async (c) => {
+    const thumbnail = await imageThumbnail(c.req.valid("query").url, c.req.raw.signal);
+    return c.body(new Uint8Array(thumbnail.bytes), 200, {
+      "Content-Type": thumbnail.mimeType,
+      "Cache-Control": "private, max-age=3600",
+    });
+  })
   .get("/configuration", async (c) => c.json(await getPiConfiguration()))
   .put("/configuration", zValidator("json", piConnectionSchema), async (c) =>
     c.json(await savePiConfiguration(c.req.valid("json"))),
@@ -38,4 +48,5 @@ export const piRoute = new Hono()
       model: model.id,
     });
   })
-  .route("/projects", piRunsRoute);
+  .route("/projects", piRunsRoute)
+  .route("/skills", piSkillsRoute);
