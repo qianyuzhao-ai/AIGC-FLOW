@@ -1,0 +1,78 @@
+name: Recover release
+run-name: Recover ${{ inputs.tag }} from run ${{ inputs.source_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已构建的版本标签，例如 v0.4.0
+        required: true
+        type: string
+      source_run_id:
+        description: 原 Release 工作流的 run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-refs/tags/${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: 校验原构建并恢复发布
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 校验原工作流、标签提交与双平台打包结果
+        run: node ../tooling/.github/scripts/validate-recovery.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          pattern: dist-*
+          path: source/dist
+          merge-multiple: true
+      - name: 复核标签与版本并生成原版本更新说明
+        id: release
+        run: |
+          node ../tooling/.github/scripts/validate-recovery.mjs
+          GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$TAG" \
+            GITHUB_SHA="$(git rev-parse HEAD)" \
+            node ../tooling/.github/scripts/prepare-release.mjs
+          printf '\n原始构建：https://github.com/%s/actions/runs/%s\n' \
+            "$GITHUB_REPOSITORY" "$SOURCE_RUN_ID" >> RELEASE_NOTES.md
+      - name: 上传原始安装包与校验和后发布
+        run: bash ../tooling/.github/scripts/publish-release.sh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+          RELEASE_STATE: ${{ steps.release.outputs.state }}
