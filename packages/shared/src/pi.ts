@@ -45,6 +45,10 @@ export const piConnectionSchema = z
         name: z.string().trim().min(1, "请填写服务名称").max(100).optional(),
         contextWindow: z.number().int().positive().max(10_000_000),
         maxTokens: z.number().int().positive().max(1_000_000),
+        input: z
+          .array(z.enum(["text", "image"]))
+          .min(1)
+          .default(["text"]),
       })
       .refine((value) => value.maxTokens <= value.contextWindow, {
         message: "输出上限不能超过上下文长度",
@@ -61,7 +65,7 @@ export type PiProviderView = {
   name: string;
   configured: boolean;
   custom?: z.infer<typeof piCustomEndpointSchema>;
-  models: (PiModelOption & { contextWindow: number; maxTokens: number })[];
+  models: (PiModelOption & { contextWindow: number; maxTokens: number; input: string[] })[];
 };
 export type PiConfiguration = {
   providers: PiProviderView[];
@@ -76,7 +80,21 @@ export const piChatMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["user", "assistant"]),
   text: z.string(),
+  runId: z.string().optional(),
+  error: z.string().nullable().optional(),
+  attachments: z
+    .array(z.object({ nodeId: z.string(), label: z.string(), url: z.string() }))
+    .default([]),
+  commands: z.array(agentCommandViewSchema).default([]),
 });
+export const piConversationSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type PiConversation = z.infer<typeof piConversationSchema>;
+export type PiImageAttachment = PiChatMessage["attachments"][number];
 export const piChatEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("partial"), text: z.string() }),
   z.object({

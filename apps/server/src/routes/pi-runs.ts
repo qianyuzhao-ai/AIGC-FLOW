@@ -15,6 +15,7 @@ import {
   stopRun,
   subscribeRun,
 } from "../pi/bridge";
+import { createConversation, getConversation, listConversations } from "../pi/conversations";
 import { latestRun, snapshotRun, startRun } from "../pi/runs";
 import { readProjectMessages } from "../pi/sessions";
 
@@ -37,22 +38,45 @@ export const piRunsRoute = new Hono()
       return c.json({ message: "运行不属于此项目" }, 404);
     await next();
   })
-  .get("/:projectId/messages", zValidator("param", project), async (c) => {
+  .get("/:projectId/conversations", zValidator("param", project), (c) =>
+    c.json({ conversations: listConversations(c.req.valid("param").projectId) }),
+  )
+  .post("/:projectId/conversations", zValidator("param", project), (c) => {
     const { projectId } = c.req.valid("param");
-    const run = latestRun(projectId);
-    return c.json({
-      messages: await readProjectMessages(projectId),
-      run: run ? runView(run.id) : null,
-      commands: run ? commandViews(run.id) : [],
-    });
+    if (latestRun(projectId)?.status === "running")
+      return c.json({ message: "请先停止当前任务" }, 409);
+    return c.json(createConversation(projectId), 201);
   })
+  .get(
+    "/:projectId/messages",
+    zValidator("param", project),
+    zValidator("query", z.object({ conversationId: z.string().min(1).optional() })),
+    async (c) => {
+      const { projectId } = c.req.valid("param");
+      const conversation = getConversation(projectId, c.req.valid("query").conversationId);
+      const run = latestRun(projectId, conversation.id);
+      return c.json({
+        conversationId: conversation.id,
+        conversations: listConversations(projectId),
+        messages: await readProjectMessages(projectId, conversation.id),
+        run: run ? runView(run.id) : null,
+        commands: run ? commandViews(run.id) : [],
+      });
+    },
+  )
   .post(
     "/:projectId/messages",
     zValidator("param", project),
     zValidator("json", startAgentRunSchema),
-    (c) => {
-      const id = startRun(c.req.valid("param").projectId, c.req.valid("json"));
-      return c.json({ runId: id }, 202);
+    async (c) => {
+      const id = await startRun(
+        c.req.valid("param").projectId,
+        c.req.valid("json"),
+        c.req.raw.signal,
+      );
+      const run = getRun(id);
+      if (!run?.conversationId) throw new Error("运行没有关联对话");
+      return c.json({ runId: id, conversationId: run.conversationId }, 202);
     },
   )
   .get(

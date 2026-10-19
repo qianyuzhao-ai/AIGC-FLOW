@@ -1,20 +1,28 @@
 "use client";
 
-import { CANVAS_TOOL_LABELS } from "@aigc-flow/shared";
-import { Bot, Square, X } from "lucide-react";
+import { Bot, SquarePen, X } from "lucide-react";
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
-import {
-  type FormEvent,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useProjectAgent } from "@/components/agent-workspace";
+import { PiChatInput } from "@/components/pi-chat-input";
+import { PiChatMessageRow } from "@/components/pi-chat-message";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CanvasPortalContext } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
 
@@ -85,35 +93,9 @@ function PiChatPanel({ projectId, onClose }: { projectId: number; onClose: () =>
   const state = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   const { messages, loading, error, commands, jobs } = state;
   const busy = state.run?.status === "running";
-  const partial = state.run?.partial ?? "";
-  const [draft, setDraft] = useState("");
-  const input = useRef<HTMLTextAreaElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
   useEffect(() => {
-    if (isPresent) {
-      void runtime.load();
-      input.current?.focus({ preventScroll: true });
-    }
+    if (isPresent) void runtime.load();
   }, [runtime, isPresent]);
-  useEffect(() => {
-    if ((messages.length || partial || commands.length) && follow.current && scroller.current)
-      scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [messages, partial, commands]);
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    if (busy || loading || !draft.trim()) return;
-    try {
-      await runtime.send(draft.trim());
-      setDraft("");
-      follow.current = true;
-    } catch {
-      /* 错误由项目运行时展示，保留草稿供重试。 */
-    }
-  }
-  const stop = () => {
-    void runtime.stop();
-  };
 
   return (
     <motion.aside
@@ -127,152 +109,115 @@ function PiChatPanel({ projectId, onClose }: { projectId: number; onClose: () =>
       transition={piChatTransition(true, reducedMotion)}
       className="pointer-events-auto absolute inset-y-0 right-0 flex w-(--pi-chat-width) flex-col border-l bg-background shadow-lg"
     >
-      <div className="flex items-center justify-between border-b p-3">
-        <div>
-          <p className="font-medium">Pi 对话</p>
-          <p className="text-muted-foreground text-xs">当前项目的创作助手</p>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b p-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Bot className="size-4 shrink-0 text-muted-foreground" />
+          <p className="font-medium text-sm">Pi 对话</p>
         </div>
-        <Button variant="ghost" size="icon-sm" aria-label="关闭 Pi 对话" onClick={onClose}>
-          <X />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            aria-label="新建对话"
+            title="新建对话"
+            disabled={busy || loading}
+            onClick={() => void runtime.newConversation()}
+          >
+            <SquarePen />
+          </Button>
+          <Button variant="ghost" size="icon-sm" aria-label="关闭 Pi 对话" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
       </div>
-      <div
-        ref={scroller}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
-        onScroll={() => {
-          const element = scroller.current;
-          if (element)
-            follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
-        }}
-      >
-        {loading && (
-          <p role="status" className="text-muted-foreground text-sm">
-            读取对话中…
-          </p>
-        )}
-        {!loading && messages.length === 0 && (
-          <p className="text-muted-foreground text-sm">
-            可以讨论创意，或让我创建节点、填写提示词、连接、排列及生成图片和视频。
-          </p>
-        )}
-        {messages.map((message) => (
-          <div key={message.id} className="space-y-1">
-            <p className="font-medium text-muted-foreground text-xs">
-              {message.role === "user" ? "你" : "Pi"}
-            </p>
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {message.text}
-            </p>
-          </div>
-        ))}
-        {partial && (
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{partial}</p>
-        )}
-        {busy && (
-          <p role="status" className="text-muted-foreground text-xs">
-            Pi 正在回复…
-          </p>
-        )}
-      </div>
-      {commands.length > 0 && (
-        <section className="max-h-52 space-y-2 overflow-auto border-t p-3" aria-label="画布任务">
-          {commands.map((command) => (
-            <details key={command.id} className="rounded border p-2 text-xs">
-              <summary className="cursor-pointer">
-                {CANVAS_TOOL_LABELS[command.name]} ·{" "}
-                {
-                  {
-                    pending: "执行中",
-                    completed: "已完成",
-                    failed: "失败",
-                    cancelled: "已停止",
-                    unknown: "结果未知",
-                  }[command.status]
-                }
-                {command.status === "pending" && command.progress ? ` · ${command.progress}` : ""}
-              </summary>
-              <p className="mt-2 whitespace-pre-wrap">
-                {command.result?.message ?? (command.result?.success ? "执行完成" : "等待执行回执")}
-              </p>
-              {Array.isArray(command.result?.data.nodeIds) && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const ids = command.result?.data.nodeIds;
-                    if (Array.isArray(ids))
-                      runtime.focus(ids.filter((id): id is string => typeof id === "string"));
-                  }}
-                >
-                  定位节点
-                </Button>
-              )}
-            </details>
-          ))}
-        </section>
-      )}
-      {jobs.length > 0 && (
-        <section
-          className="max-h-32 space-y-1 overflow-auto border-t p-3 text-xs"
-          aria-label="生成任务"
+      <div className="shrink-0 border-b px-3 py-2">
+        <Select
+          value={state.conversationId ?? ""}
+          disabled={busy || loading}
+          onValueChange={(id) => void runtime.load(id)}
         >
-          {jobs.map((job) => (
-            <div key={job.id}>
-              {job.kind === "image" ? "图片" : "视频"} ·{" "}
-              {
-                { running: "生成中", succeeded: "成功", failed: "失败", unknown: "结果未知" }[
-                  job.status
-                ]
-              }
-              {job.resultUrl && (
-                <a className="ml-2 underline" href={job.resultUrl} target="_blank" rel="noreferrer">
-                  查看结果
-                </a>
+          <SelectTrigger
+            className="w-full border-0 bg-transparent shadow-none"
+            aria-label="历史对话"
+          >
+            <SelectValue placeholder="选择对话" />
+          </SelectTrigger>
+          <SelectContent>
+            {state.conversations.map((conversation) => (
+              <SelectItem key={conversation.id} value={conversation.id}>
+                <span className="truncate">{conversation.title}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <MessageScrollerProvider
+        key={`transcript-${state.conversationId ?? "initial"}`}
+        defaultScrollPosition="end"
+      >
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport>
+            <MessageScrollerContent
+              className="gap-5 p-4"
+              aria-busy={busy || loading}
+              aria-label="对话记录"
+            >
+              {loading && messages.length === 0 && (
+                <MessageScrollerItem>
+                  <p role="status" className="text-muted-foreground text-sm">
+                    读取对话中…
+                  </p>
+                </MessageScrollerItem>
               )}
-              {job.error && <span className="ml-2 text-destructive">{job.error}</span>}
-            </div>
-          ))}
-        </section>
-      )}
-      <form onSubmit={send} className="space-y-2 border-t p-3">
-        {error && (
-          <p role="alert" className="text-destructive text-sm">
-            {error}
-          </p>
-        )}
-        <label htmlFor={`pi-message-${projectId}`} className="sr-only">
-          发送给 Pi 的消息
-        </label>
-        <Textarea
-          ref={input}
-          id={`pi-message-${projectId}`}
-          value={draft}
-          maxLength={32000}
-          placeholder="输入消息…"
-          className="max-h-40 resize-none"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-muted-foreground text-xs">Enter 发送 · Shift+Enter 换行</span>
-          {busy ? (
-            <Button type="button" variant="outline" onClick={stop}>
-              <Square />
-              停止
-            </Button>
-          ) : (
-            <Button type="submit" disabled={loading || !draft.trim()}>
-              发送
-            </Button>
-          )}
-        </div>
-      </form>
+              {!loading && messages.length === 0 && (
+                <MessageScrollerItem>
+                  <div className="space-y-2 py-10 text-center">
+                    <Bot className="mx-auto size-7 text-muted-foreground" />
+                    <p className="font-medium text-sm">从一个想法开始</p>
+                    <p className="mx-auto max-w-64 text-muted-foreground text-sm leading-relaxed">
+                      讨论创意、操作画布，或选择图片一起分析。对话会自动保存在当前项目。
+                    </p>
+                  </div>
+                </MessageScrollerItem>
+              )}
+              {messages.map((message) => {
+                const current = message.role === "assistant" && message.runId === state.run?.id;
+                return (
+                  <MessageScrollerItem
+                    key={message.id}
+                    messageId={message.id}
+                    scrollAnchor={message.role === "user"}
+                  >
+                    <PiChatMessageRow
+                      message={message}
+                      jobs={jobs}
+                      onFocus={(ids) => runtime.focus(ids)}
+                      streaming={current && busy}
+                      partial={current ? state.run?.partial : ""}
+                      commands={current ? commands : message.commands}
+                      error={current ? state.run?.error : message.error}
+                    />
+                  </MessageScrollerItem>
+                );
+              })}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton
+            aria-label="回到最新消息"
+            behavior={reducedMotion ? "instant" : "smooth"}
+            className="motion-reduce:transition-none"
+          />
+        </MessageScroller>
+      </MessageScrollerProvider>
+      <PiChatInput
+        key={`composer-${state.conversationId ?? "initial"}`}
+        runtime={runtime}
+        busy={busy}
+        loading={loading}
+        error={error}
+      />
     </motion.aside>
   );
 }

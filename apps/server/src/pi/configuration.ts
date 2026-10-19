@@ -39,12 +39,15 @@ export async function getPiConfiguration(): Promise<PiConfiguration> {
           name: provider.name,
           configured: models.hasConfiguredAuth(provider.id),
           ...(provider.id.startsWith("custom-") && custom.success ? { custom: custom.data } : {}),
-          models: models.getModels(provider.id).map(({ id, name, contextWindow, maxTokens }) => ({
-            id,
-            name,
-            contextWindow,
-            maxTokens,
-          })),
+          models: models
+            .getModels(provider.id)
+            .map(({ id, name, contextWindow, maxTokens, input }) => ({
+              id,
+              name,
+              contextWindow,
+              maxTokens,
+              input,
+            })),
         };
       })
       .filter((provider) => provider.models.length > 0)
@@ -82,6 +85,7 @@ async function saveConnection(input: PiConnection) {
           id: input.model,
           contextWindow,
           maxTokens,
+          input: input.custom.input,
         },
       ],
     };

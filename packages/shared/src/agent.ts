@@ -99,6 +99,7 @@ export const agentRunViewSchema = z.object({
   status: agentRunStatusSchema,
   error: z.string().nullable(),
   partial: z.string(),
+  conversationId: z.string().nullable().optional(),
 });
 export const agentCommandViewSchema = canvasCommandSchema.extend({
   status: z.enum(["pending", "completed", "failed", "cancelled", "unknown"]),
@@ -112,6 +113,8 @@ export const startAgentRunSchema = z.object({
   requestId: id,
   clientId: id,
   selectedNodeIds: z.array(id).max(500).default([]),
+  conversationId: id.optional(),
+  imageNodeIds: z.array(id).max(6).default([]),
 });
 export const commandResultSchema = z.object({ clientId: id, result: canvasReceiptSchema });
 export const generationJobRequestSchema = z.discriminatedUnion("kind", [
