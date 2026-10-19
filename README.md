@@ -79,6 +79,7 @@ Electron 桌面端使用 48px 全高标签栏，保留原生窗口控制。点�
 ```sh
 pnpm typecheck
 pnpm lint
+node --test .github/scripts/*.test.mjs apps/desktop/build/build-web.test.cjs
 pnpm --filter @aigc-flow/desktop test
 pnpm --filter @aigc-flow/server exec node --import tsx --test ../client/src/lib/graph.test.ts
 pnpm --filter @aigc-flow/desktop build:web
@@ -92,7 +93,7 @@ Electron 集成测试使用临时用户目录、内存项目 API 和模拟生成
 若构建环境限制 Turbopack 的子进程绑定端口，可以使用 Next.js 官方 webpack 构建器：
 
 ```sh
-DESKTOP=1 pnpm --filter @aigc-flow/client exec next build --webpack
+pnpm --filter @aigc-flow/desktop build:web --webpack
 ```
 
 Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实机确认。
@@ -106,13 +107,40 @@ Windows 的原生 Window Controls Overlay 和高 DPI 行为需要在 Windows 实
    通过 PR 合并回 `dev`。
 2. 从 `dev` 发起到 `main` 的发布 PR，评审并合并后，在该 `main` 提交上创建版本标签
    （例如 `v0.2.0`），标签版本必须与包版本一致。
-3. 推送版本标签触发 `.github/workflows/release.yml`，分别构建 macOS arm64 / x64 的
-   DMG、ZIP，以及 Windows x64 的 EXE。也可以对已验证的提交手动运行该工作流。
-4. 两个平台构建成功后，在 Actions 中下载 `dist-macos-latest` 和 `dist-windows-latest`
-   产物，核对安装包版本并完成实机安装验证，再使用同一标签和更新说明发布 GitHub Release。
+3. 推送新的 `vX.Y.Z` 标签，触发 `.github/workflows/release.yml`。工作流先校验标签提交
+   已进入 `main`、五处包版本一致、对应更新说明存在且该版本未发布，再分别构建 macOS
+   arm64 / x64 的 DMG、ZIP，以及 Windows x64 的 EXE。
+4. 两个平台完成打包和运行检查后，统一将本轮的五个安装包及 SHA-256 校验和上传至
+   GitHub Release。更新说明取自 `CHANGELOG.md` 对应版本；附件全部上传后自动公开发布。
+   `vX.Y.Z-beta.1` 等带后缀的版本会标记为预发布。
 
-当前工作流只上传 Actions 构建产物，不会自动创建 GitHub Release；合并 `main` 本身也不会
-触发打包。只有版本标签或手动运行工作流才触发构建。
+正式发布只有标签 push 一个入口。合并 `main`、推送 `dev` / 功能分支和 PR 均不触发打包，
+也不提供 Actions 手动运行入口。GitHub 标签事件本身没有所属分支过滤，非 `main` 历史中的
+标签会启动校验，但不会进入打包和发布任务。不要强制移动、删除重建或复用发布标签；
+已发布版本的修复应递增版本号。
+
+构建失败时可以重跑失败的任务；上传中断会保留草稿，重跑发布任务会复用本轮构建产物，
+补齐附件后发布，不需要再手动打一轮包。Actions 中转产物保留 7 天；超过保留期后需要
+重跑完整流程。已公开发布的版本禁止覆盖附件。
+
+## 本地测试打包
+
+测试新功能时在功能分支本地打包，不创建发布标签，也不运行 GitHub Actions：
+
+```sh
+# macOS 主机：生成 Apple Silicon 和 Intel 安装包
+pnpm dist:mac
+
+# Windows 主机：生成 Windows x64 安装包
+pnpm dist:win
+
+# 检查当前主机架构的安装包运行依赖
+pnpm --filter @aigc-flow/desktop test:package
+```
+
+安装包位于 `apps/desktop/release/`。本地命令显式使用 `--publish never`，不会创建 Release
+或上传安装包；前端静态导出支持 macOS 和 Windows。常规功能测试无需每次都打完整安装包，
+可先用 `pnpm desktop` 调试。
 
 工作流在上传前使用打包后的 Electron 检查 SQLite 原生模块和 Pi SDK。检查会将应用归档
 复制到临时目录，防止仓库依赖掩盖漏包问题；不会访问用户数据库或调用模型。
