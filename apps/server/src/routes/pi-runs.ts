@@ -1,4 +1,8 @@
-import { commandResultSchema, startAgentRunSchema } from "@aigc-flow/shared";
+import {
+  commandResultSchema,
+  renamePiConversationSchema,
+  startAgentRunSchema,
+} from "@aigc-flow/shared";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -15,7 +19,12 @@ import {
   stopRun,
   subscribeRun,
 } from "../pi/bridge";
-import { createConversation, getConversation, listConversations } from "../pi/conversations";
+import {
+  createConversation,
+  getConversation,
+  listConversations,
+  renameConversation,
+} from "../pi/conversations";
 import { latestRun, snapshotRun, startRun } from "../pi/runs";
 import { readProjectMessages, readSessionInfo } from "../pi/sessions";
 
@@ -40,6 +49,15 @@ export const piRunsRoute = new Hono()
   })
   .get("/:projectId/conversations", zValidator("param", project), (c) =>
     c.json({ conversations: listConversations(c.req.valid("param").projectId) }),
+  )
+  .patch(
+    "/:projectId/conversations/:conversationId",
+    zValidator("param", project.extend({ conversationId: z.string().min(1) })),
+    zValidator("json", renamePiConversationSchema),
+    (c) => {
+      const { projectId, conversationId } = c.req.valid("param");
+      return c.json(renameConversation(projectId, conversationId, c.req.valid("json").title));
+    },
   )
   .get(
     "/:projectId/session-info",

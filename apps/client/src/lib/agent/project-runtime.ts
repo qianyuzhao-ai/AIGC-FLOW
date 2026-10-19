@@ -180,6 +180,21 @@ export class ProjectRuntime {
       });
     }
   }
+  async renameConversation(conversationId: string, title: string) {
+    const response = await api.api.pi.projects[":projectId"].conversations[
+      ":conversationId"
+    ].$patch({
+      param: { projectId: String(this.projectId), conversationId },
+      json: { title },
+    });
+    if (!response.ok) throw await apiError(response);
+    const conversation = await response.json();
+    this.patch({
+      conversations: this.view.conversations.map((item) =>
+        item.id === conversation.id ? conversation : item,
+      ),
+    });
+  }
   async load(conversationId = this.view.conversationId) {
     if (this.view.loading || this.view.run?.status === "running") return;
     this.patch({ loading: true, error: "" });

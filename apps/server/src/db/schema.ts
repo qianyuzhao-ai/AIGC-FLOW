@@ -72,6 +72,7 @@ export const agentConversations = sqliteTable("agent_conversations", {
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
   title: text("title").notNull().default("新对话"),
+  titleCustomized: integer("title_customized", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().default(isoNow),
   updatedAt: text("updated_at").notNull().default(isoNow),
 });

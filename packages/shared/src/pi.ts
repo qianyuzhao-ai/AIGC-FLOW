@@ -99,6 +99,9 @@ export const piConversationSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+export const renamePiConversationSchema = z.object({
+  title: z.string().trim().min(1, "请输入对话名称").max(100, "对话名称最多 100 个字符"),
+});
 export type PiConversation = z.infer<typeof piConversationSchema>;
 export type PiImageAttachment = PiChatMessage["attachments"][number];
 export const piSessionInfoSchema = z.object({

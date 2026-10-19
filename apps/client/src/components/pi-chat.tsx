@@ -181,6 +181,7 @@ function PiChatPanel({
       {history && (
         <PiChatHistory
           conversations={state.conversations}
+          onRename={(id, title) => runtime.renameConversation(id, title)}
           currentId={state.conversationId}
           disabled={busy || loading}
           onBack={() => setHistory(false)}

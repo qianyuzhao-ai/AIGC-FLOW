@@ -55,10 +55,23 @@ export function touchConversation(id: string, message: string) {
   db.update(agentConversations)
     .set({
       updatedAt: new Date().toISOString(),
-      title: ["新对话", "历史对话"].includes(conversation.title)
-        ? message.slice(0, 40)
-        : conversation.title,
+      title:
+        !conversation.titleCustomized && ["新对话", "历史对话"].includes(conversation.title)
+          ? message.slice(0, 40)
+          : conversation.title,
     })
     .where(eq(agentConversations.id, id))
     .run();
+}
+
+export function renameConversation(projectId: number, conversationId: string, title: string) {
+  getConversation(projectId, conversationId);
+  return db
+    .update(agentConversations)
+    .set({ title, titleCustomized: true })
+    .where(
+      and(eq(agentConversations.projectId, projectId), eq(agentConversations.id, conversationId)),
+    )
+    .returning()
+    .get();
 }

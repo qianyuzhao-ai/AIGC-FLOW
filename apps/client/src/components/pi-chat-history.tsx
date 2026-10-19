@@ -1,10 +1,12 @@
 "use client";
 
 import type { PiConversation } from "@aigc-flow/shared";
-import { ArrowLeft, Check, MessageSquare } from "lucide-react";
+import { ArrowLeft, Check, MessageSquare, Pencil } from "lucide-react";
 import { useState } from "react";
+import { PiChatRenameDialog } from "@/components/pi-chat-rename-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export function PiChatHistory({
   conversations,
@@ -12,14 +14,17 @@ export function PiChatHistory({
   disabled,
   onSelect,
   onBack,
+  onRename,
 }: {
   conversations: PiConversation[];
   currentId: string | null;
   disabled: boolean;
   onSelect: (id: string) => Promise<void>;
   onBack: () => void;
+  onRename: (id: string, title: string) => Promise<void>;
 }) {
   const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<PiConversation | null>(null);
   const matching = conversations.filter((item) =>
     item.title.toLowerCase().includes(search.toLowerCase()),
   );
@@ -43,33 +48,61 @@ export function PiChatHistory({
       />
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         {matching.map((item) => (
-          <button
+          <div
             key={item.id}
-            type="button"
-            disabled={disabled}
-            aria-current={item.id === currentId ? "true" : undefined}
-            className="flex w-full items-start gap-3 rounded-lg p-3 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 aria-current:bg-muted [content-visibility:auto] [contain-intrinsic-size:auto_4rem]"
-            onClick={() => void onSelect(item.id)}
+            className={cn(
+              "flex items-center gap-1 rounded-lg pr-2 hover:bg-muted [content-visibility:auto] [contain-intrinsic-size:auto_4rem]",
+              item.id === currentId && "bg-muted",
+            )}
           >
-            <MessageSquare className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm">{item.title}</span>
-              <time dateTime={item.updatedAt} className="mt-1 block text-muted-foreground text-xs">
-                {new Date(item.updatedAt).toLocaleString("zh-CN", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </time>
-            </span>
-            {item.id === currentId && <Check className="size-4 shrink-0" />}
-          </button>
+            <button
+              type="button"
+              disabled={disabled}
+              aria-current={item.id === currentId ? "true" : undefined}
+              className="flex min-w-0 flex-1 items-start gap-3 rounded-lg p-3 text-left focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+              onClick={() => void onSelect(item.id)}
+            >
+              <MessageSquare className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{item.title}</span>
+                <time
+                  dateTime={item.updatedAt}
+                  className="mt-1 block text-muted-foreground text-xs"
+                >
+                  {new Date(item.updatedAt).toLocaleString("zh-CN", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </time>
+              </span>
+              {item.id === currentId && <Check className="size-4 shrink-0" />}
+            </button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              aria-label={`重命名对话：${item.title}`}
+              title="重命名"
+              onClick={() => setEditing(item)}
+            >
+              <Pencil />
+            </Button>
+          </div>
         ))}
         {matching.length === 0 && (
           <p className="py-8 text-center text-muted-foreground text-sm">没有找到对话</p>
         )}
       </div>
+      {editing && (
+        <PiChatRenameDialog
+          conversation={editing}
+          onRename={onRename}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </section>
   );
 }
