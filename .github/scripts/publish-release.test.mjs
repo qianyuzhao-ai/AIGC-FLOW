@@ -9,7 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(new URL("./publish-release.sh", import.meta.url));
 
-function publish({ state = "absent", failUpload = false, missingPackage = false } = {}) {
+function publish({
+  state = "absent",
+  failUpload = false,
+  missingPackage = false,
+  normalizedWindows = false,
+  duplicateWindows = false,
+} = {}) {
   const cwd = mkdtempSync(join(tmpdir(), "aigc publish "));
   mkdirSync(join(cwd, "bin"));
   mkdirSync(join(cwd, "dist"));
@@ -22,7 +28,11 @@ function publish({ state = "absent", failUpload = false, missingPackage = false 
     "AIGC-FLOW.Setup.1.2.3.exe",
   ];
   for (const file of missingPackage ? files.slice(0, -1) : files) {
-    writeFileSync(join(cwd, "dist", file), `fixture ${file}`);
+    const source = file.endsWith(".exe") && !normalizedWindows ? "AIGC-FLOW Setup 1.2.3.exe" : file;
+    writeFileSync(join(cwd, "dist", source), `fixture ${file}`);
+  }
+  if (duplicateWindows) {
+    writeFileSync(join(cwd, "dist/AIGC-FLOW.Setup.1.2.3.exe"), "ambiguous package");
   }
   const log = join(cwd, "calls.jsonl");
   writeFileSync(
@@ -94,4 +104,17 @@ test("missing packages and published versions cannot upload or publish", () => {
     assert.notEqual(result.status, 0);
     assert.deepEqual(calls, []);
   }
+});
+
+test("already normalized Windows packages can be retried without rebuilding", () => {
+  const { result, calls } = publish({ state: "draft", normalizedWindows: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(calls[1].includes("AIGC-FLOW.Setup.1.2.3.exe"));
+});
+
+test("ambiguous Windows packages cannot upload or publish", () => {
+  const { result, calls } = publish({ duplicateWindows: true });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /同时存在两种文件名/);
+  assert.deepEqual(calls, []);
 });
