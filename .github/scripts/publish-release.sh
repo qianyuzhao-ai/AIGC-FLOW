@@ -2,6 +2,16 @@
 set -euo pipefail
 
 cd dist
+windows_package="AIGC-FLOW Setup ${VERSION}.exe"
+windows_asset="AIGC-FLOW.Setup.${VERSION}.exe"
+if [[ -f "$windows_package" ]]; then
+  if [[ -e "$windows_asset" ]]; then
+    echo "::error::Windows 安装包同时存在两种文件名，无法确定发布文件"
+    exit 1
+  fi
+  mv -- "$windows_package" "$windows_asset"
+fi
+
 files=(
   "AIGC-FLOW-${VERSION}-arm64.dmg"
   "AIGC-FLOW-${VERSION}.dmg"
