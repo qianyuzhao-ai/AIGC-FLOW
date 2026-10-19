@@ -56,6 +56,7 @@ export async function startRun(
     selectedNodeIds: input.selectedNodeIds,
     conversationId: conversation.id,
     imageNodeIds: input.imageNodeIds,
+    thinkingLevel: input.thinkingLevel,
   });
   const existingRequest = () => {
     const existing = db
@@ -73,6 +74,11 @@ export async function startRun(
     ? selectedImages(projectId, input.imageNodeIds)
     : [];
   const model = await getConfiguredModel();
+  if (input.thinkingLevel) {
+    const { getSupportedThinkingLevels } = await import("@earendil-works/pi-ai");
+    if (!getSupportedThinkingLevels(model).includes(input.thinkingLevel))
+      throw new Error("当前模型不支持这个思考等级，请刷新模型信息后重试");
+  }
   if (attachments.length && !model.input.includes("image"))
     throw new Error("当前 Pi 模型未启用图片输入，请选择视觉模型，或在自定义模型设置中开启图片输入");
   const images = await loadImages(attachments, signal);
@@ -108,6 +114,7 @@ export async function startRun(
       if (getRun(id)?.status !== "running") return;
       live.abort = () => session.abort();
       await session.setModel(model);
+      if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
       if (getRun(id)?.status !== "running") return;
       session.sessionManager.appendCustomEntry("aigc-flow-turn", {
         runId: id,

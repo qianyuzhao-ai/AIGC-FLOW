@@ -789,6 +789,61 @@ test("Pi configuration and project conversation", async (t) => {
       assert.equal((await jsonRequest(chatPath, { ...request, message: "changed" })).status, 400);
     },
   );
+  await t.test(
+    "session info exposes supported thinking levels and persists the selected effort",
+    async () => {
+      const path = `/api/pi/projects/${first.id}/session-info`;
+      const before = (await (await app.request(path)).json()) as { thinkingLevels: string[] };
+      assert.deepEqual(before.thinkingLevels, []);
+      assert.equal(
+        (
+          await jsonRequest(chatPath, {
+            message: "hello",
+            clientId,
+            requestId: crypto.randomUUID(),
+            thinkingLevel: "high",
+          })
+        ).status,
+        400,
+      );
+      await jsonRequest(
+        "/api/pi/configuration",
+        {
+          ...connection,
+          custom: { ...connection.custom, reasoning: true, input: ["text", "image"] },
+        },
+        "PUT",
+      );
+      const supported = (await (await app.request(path)).json()) as {
+        model: { id: string };
+        thinkingLevels: string[];
+      };
+      assert.equal(supported.model.id, "test-model");
+      assert.ok(supported.thinkingLevels.includes("high"));
+      const response = await jsonRequest(chatPath, {
+        message: "hello reasoning",
+        clientId,
+        requestId: crypto.randomUUID(),
+        thinkingLevel: "high",
+      });
+      assert.equal(response.status, 202);
+      const { runId } = (await response.json()) as { runId: string };
+      await collect(readPiStream(await eventsFor(runId)));
+      assert.equal(received.at(-1)?.body.reasoning_effort, "high");
+      const info = (await (await app.request(path)).json()) as {
+        thinkingLevel: string;
+        context: { tokens: number; contextWindow: number };
+      };
+      assert.equal(info.thinkingLevel, "high");
+      assert.ok(info.context.tokens > 0);
+      assert.equal(info.context.contextWindow, 32768);
+      const session = await getProjectSession(first.id);
+      const { sdk } = await getPiRuntime();
+      const file = session.sessionManager.getSessionFile();
+      assert.ok(file);
+      assert.equal(sdk.SessionManager.open(file).buildSessionContext().thinkingLevel, "high");
+    },
+  );
 });
 
 test("SSE parser handles UTF-8 split between chunks and detects a truncated response", async () => {

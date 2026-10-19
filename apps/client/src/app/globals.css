@@ -5,7 +5,6 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --pi-chat-width: min(400px, calc(100vw - 2rem));
   --desktop-titlebar: #e5e5e5;
   --desktop-tab-inactive: #d4d4d4;
   --desktop-tab-hover: #e0e0e0;
@@ -404,4 +403,94 @@
 [data-canvas-mode] .react-flow__node.react-flow__node-group {
   /* biome-ignore lint/complexity/noImportantStyles: 覆盖 React Flow 选中编组时写入的内联层级 */
   z-index: -2 !important;
+}
+
+.pi-markdown {
+  overflow-wrap: anywhere;
+}
+.pi-markdown :where(p, ul, ol, blockquote, pre, table) {
+  margin-block: 0.75em;
+}
+.pi-markdown :where(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1em 0.5em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.pi-markdown :where(h1) {
+  font-size: 1.4em;
+}
+.pi-markdown :where(h2) {
+  font-size: 1.25em;
+}
+.pi-markdown :where(h3) {
+  font-size: 1.1em;
+}
+.pi-markdown :where(ul) {
+  list-style: disc;
+  padding-inline-start: 1.5em;
+}
+.pi-markdown :where(ol) {
+  list-style: decimal;
+  padding-inline-start: 1.5em;
+}
+.pi-markdown :where(li + li) {
+  margin-top: 0.25em;
+}
+.pi-markdown :where(li > ul, li > ol, li > p) {
+  margin-block: 0.25em;
+}
+.pi-markdown :where(a) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pi-markdown :where(blockquote) {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 0.75em;
+  color: var(--muted-foreground);
+}
+.pi-markdown :where(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 0.75em;
+}
+.pi-markdown :where(code) {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.875em;
+}
+.pi-markdown :where(:not(pre) > code) {
+  border-radius: 0.25em;
+  background: var(--muted);
+  padding: 0.15em 0.3em;
+}
+.pi-markdown :where(table) {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.pi-markdown :where(th, td) {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.6em;
+}
+.pi-markdown :where(th) {
+  background: var(--muted);
+  font-weight: 600;
+}
+.pi-markdown :where(hr) {
+  margin-block: 1em;
+  border-color: var(--border);
+}
+.pi-markdown :where(.task-list-item) {
+  list-style: none;
+}
+.pi-markdown :where(.task-list-item input) {
+  margin-inline-end: 0.5em;
+}
+.pi-markdown > :first-child {
+  margin-top: 0;
+}
+.pi-markdown > :last-child {
+  margin-bottom: 0;
 }

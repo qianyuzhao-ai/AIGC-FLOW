@@ -17,6 +17,7 @@ import {
   Eraser,
   Group,
   LayoutGrid,
+  MessageSquarePlus,
   Tag,
   Ungroup,
   X,
@@ -33,8 +34,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { type AlignMode, DISTRIBUTE_MIN, type SpacingMode } from "@/lib/layout";
 
 /**
- * 选中这么多个节点才出现工具条。
- * 1 个节点谈不上对齐和分布，节点自己的缩放框已经够用了。
+ * 排布与批量操作至少需要两个节点。单张图片仍显示「添加到 chat」。
  */
 export const SELECTION_TOOLBAR_MIN = 2;
 
@@ -56,6 +56,8 @@ const SPACING_ITEMS: Array<{ mode: SpacingMode; label: string; icon: typeof Alig
 
 type SelectionToolbarProps = {
   selectedIds: string[];
+  chatImageCount: number;
+  onAddToChat: () => void;
   /** 选区正好是一个编组时的编组 id，工具条据此切到「解组」形态 */
   groupId: string | null;
   /** 选区能不能编组。不能的原因只有一个：里面已经有编组或组内节点（暂不支持嵌套） */
@@ -81,7 +83,7 @@ const MARK_ITEMS: Array<{ mark: NodeMark | null; label: string; icon: typeof Che
 ];
 
 /**
- * 多选时浮在选区上方的操作条。
+ * 浮在选区上方的操作条；单张图片提供聊天附件入口。
  *
  * 位置交给 React Flow 的 NodeToolbar：传一组 nodeId 进去，它会自己算这批节点的
  * 包围盒并跟着缩放 / 平移走，不用我们自己把画布坐标换算成屏幕坐标。
@@ -89,6 +91,8 @@ const MARK_ITEMS: Array<{ mark: NodeMark | null; label: string; icon: typeof Che
  */
 export function SelectionToolbar({
   selectedIds,
+  chatImageCount,
+  onAddToChat,
   groupId,
   canGroup,
   onGroup,
@@ -101,9 +105,9 @@ export function SelectionToolbar({
   onMark,
   markCount,
 }: SelectionToolbarProps) {
-  // 两种形态：选中一个编组时只提供解组 + 下载；选中多个普通节点时是排布那一套
+  // 编组提供解组操作，多选普通节点提供排布操作。
   const isGroup = groupId !== null;
-  if (!isGroup && selectedIds.length < SELECTION_TOOLBAR_MIN) return null;
+  if (!isGroup && selectedIds.length < SELECTION_TOOLBAR_MIN && chatImageCount === 0) return null;
 
   return (
     <NodeToolbar
@@ -113,95 +117,142 @@ export function SelectionToolbar({
       offset={36}
       className="flex items-center gap-0.5 rounded-xl border bg-background/90 p-1 shadow-lg backdrop-blur-sm"
     >
-      {isGroup ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" onClick={onUngroup}>
-              <Ungroup />
-              解组
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">拆掉编组，成员留在原地</TooltipContent>
-        </Tooltip>
-      ) : (
+      {chatImageCount > 0 && (
+        <Button variant="ghost" size="sm" onClick={onAddToChat}>
+          <MessageSquarePlus />
+          添加到 chat{chatImageCount > 1 ? ` · ${chatImageCount}` : ""}
+        </Button>
+      )}
+      {(isGroup || selectedIds.length >= SELECTION_TOOLBAR_MIN) && (
         <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onArrange}>
-                <LayoutGrid />
-                整理节点
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">按阅读顺序重排成等距网格</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* disabled 的按钮不派发鼠标事件，tooltip 收不到 hover，套一层 span 承接 */}
-              <span className="inline-flex">
-                <Button variant="ghost" size="sm" disabled={!canGroup} onClick={onGroup}>
-                  <Group />
-                  创建编组
+          {isGroup ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={onUngroup}>
+                  <Ungroup />
+                  解组
                 </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {canGroup ? "把选中的节点框成一组" : "选区里含编组或组内节点，暂不支持嵌套编组"}
-            </TooltipContent>
-          </Tooltip>
+              </TooltipTrigger>
+              <TooltipContent side="top">拆掉编组，成员留在原地</TooltipContent>
+            </Tooltip>
+          ) : (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" onClick={onArrange}>
+                    <LayoutGrid />
+                    整理节点
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">按阅读顺序重排成等距网格</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* disabled 的按钮不派发鼠标事件，tooltip 收不到 hover，套一层 span 承接 */}
+                  <span className="inline-flex">
+                    <Button variant="ghost" size="sm" disabled={!canGroup} onClick={onGroup}>
+                      <Group />
+                      创建编组
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {canGroup ? "把选中的节点框成一组" : "选区里含编组或组内节点，暂不支持嵌套编组"}
+                </TooltipContent>
+              </Tooltip>
+
+              <Separator orientation="vertical" className="!h-5 !self-center mx-1" />
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" aria-label="对齐方式">
+                    <AlignStartVertical />
+                    <ChevronDown />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" side="top" className="min-w-40">
+                  {ALIGN_ITEMS.map(({ mode, label, icon: Icon }) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      onSelect={() => onAlign(mode)}
+                      className="whitespace-nowrap"
+                    >
+                      <Icon />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* 两档都要求至少 3 个，不够时整个按钮置灰；disabled 不派发鼠标事件，套 span 承接 tooltip */}
+                    <span className="inline-flex">
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={selectedIds.length < DISTRIBUTE_MIN}
+                          aria-label="等距分布"
+                        >
+                          <AlignHorizontalSpaceAround />
+                          <ChevronDown />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {selectedIds.length < DISTRIBUTE_MIN
+                      ? `等距分布至少要选 ${DISTRIBUTE_MIN} 个节点`
+                      : "等距分布"}
+                  </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="center" side="top" className="min-w-40">
+                  {SPACING_ITEMS.map(({ mode, label, icon: Icon }) => (
+                    <DropdownMenuItem
+                      key={mode}
+                      onSelect={() => onSpace(mode)}
+                      className="whitespace-nowrap"
+                    >
+                      <Icon />
+                      {label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
 
           <Separator orientation="vertical" className="!h-5 !self-center mx-1" />
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" aria-label="对齐方式">
-                <AlignStartVertical />
-                <ChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" side="top" className="min-w-40">
-              {ALIGN_ITEMS.map(({ mode, label, icon: Icon }) => (
-                <DropdownMenuItem
-                  key={mode}
-                  onSelect={() => onAlign(mode)}
-                  className="whitespace-nowrap"
-                >
-                  <Icon />
-                  {label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* 两档都要求至少 3 个，不够时整个按钮置灰；disabled 不派发鼠标事件，套 span 承接 tooltip */}
                 <span className="inline-flex">
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={selectedIds.length < DISTRIBUTE_MIN}
-                      aria-label="等距分布"
+                      disabled={markCount === 0}
+                      aria-label="批量标记"
                     >
-                      <AlignHorizontalSpaceAround />
+                      <Tag />
                       <ChevronDown />
                     </Button>
                   </DropdownMenuTrigger>
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top">
-                {selectedIds.length < DISTRIBUTE_MIN
-                  ? `等距分布至少要选 ${DISTRIBUTE_MIN} 个节点`
-                  : "等距分布"}
+                {markCount === 0 ? "选区里没有可标记的素材" : `标记 ${markCount} 个素材`}
               </TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="center" side="top" className="min-w-40">
-              {SPACING_ITEMS.map(({ mode, label, icon: Icon }) => (
+              {MARK_ITEMS.map(({ mark, label, icon: Icon }) => (
                 <DropdownMenuItem
-                  key={mode}
-                  onSelect={() => onSpace(mode)}
+                  key={label}
+                  onSelect={() => onMark(mark)}
                   className="whitespace-nowrap"
                 >
                   <Icon />
@@ -210,60 +261,28 @@ export function SelectionToolbar({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* disabled 的按钮不派发鼠标事件，tooltip 收不到 hover，套一层 span 承接 */}
+              <span className="inline-flex">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={downloadCount === 0}
+                  onClick={onDownload}
+                  aria-label="批量下载"
+                >
+                  <Download />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {downloadCount === 0 ? "选区里没有可下载的素材" : `批量下载 ${downloadCount} 个素材`}
+            </TooltipContent>
+          </Tooltip>
         </>
       )}
-
-      <Separator orientation="vertical" className="!h-5 !self-center mx-1" />
-
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" disabled={markCount === 0} aria-label="批量标记">
-                  <Tag />
-                  <ChevronDown />
-                </Button>
-              </DropdownMenuTrigger>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {markCount === 0 ? "选区里没有可标记的素材" : `标记 ${markCount} 个素材`}
-          </TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="center" side="top" className="min-w-40">
-          {MARK_ITEMS.map(({ mark, label, icon: Icon }) => (
-            <DropdownMenuItem
-              key={label}
-              onSelect={() => onMark(mark)}
-              className="whitespace-nowrap"
-            >
-              <Icon />
-              {label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {/* disabled 的按钮不派发鼠标事件，tooltip 收不到 hover，套一层 span 承接 */}
-          <span className="inline-flex">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={downloadCount === 0}
-              onClick={onDownload}
-              aria-label="批量下载"
-            >
-              <Download />
-            </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          {downloadCount === 0 ? "选区里没有可下载的素材" : `批量下载 ${downloadCount} 个素材`}
-        </TooltipContent>
-      </Tooltip>
     </NodeToolbar>
   );
 }

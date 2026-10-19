@@ -17,7 +17,7 @@ import {
 } from "../pi/bridge";
 import { createConversation, getConversation, listConversations } from "../pi/conversations";
 import { latestRun, snapshotRun, startRun } from "../pi/runs";
-import { readProjectMessages } from "../pi/sessions";
+import { readProjectMessages, readSessionInfo } from "../pi/sessions";
 
 const project = z.object({ projectId: z.coerce.number().int().positive() });
 const runParams = project.extend({ runId: z.string().min(1) });
@@ -40,6 +40,15 @@ export const piRunsRoute = new Hono()
   })
   .get("/:projectId/conversations", zValidator("param", project), (c) =>
     c.json({ conversations: listConversations(c.req.valid("param").projectId) }),
+  )
+  .get(
+    "/:projectId/session-info",
+    zValidator("param", project),
+    zValidator("query", z.object({ conversationId: z.string().min(1).optional() })),
+    async (c) =>
+      c.json(
+        await readSessionInfo(c.req.valid("param").projectId, c.req.valid("query").conversationId),
+      ),
   )
   .post("/:projectId/conversations", zValidator("param", project), (c) => {
     const { projectId } = c.req.valid("param");

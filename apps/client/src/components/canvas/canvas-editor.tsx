@@ -71,6 +71,7 @@ import {
   spaceNodes,
 } from "@/lib/layout";
 import { idsByMark, markableIds, markNodes, markSummary } from "@/lib/node-mark";
+import { nodeMediaOf } from "@/lib/node-media";
 import { AnimatedEdge } from "./animated-edge";
 import { CanvasControls } from "./canvas-controls";
 import { CanvasActionGroup, CanvasInfoGroup } from "./canvas-toolbar";
@@ -621,6 +622,21 @@ export function CanvasEditor({
     [nodes, mediaTargetIds],
   );
 
+  const chatImageIds = useMemo(
+    () =>
+      nodes
+        .filter((node) => mediaTargetIds.includes(node.id) && nodeMediaOf(node)?.kind === "image")
+        .map((node) => node.id),
+    [nodes, mediaTargetIds],
+  );
+  const handleAddToChat = () => {
+    try {
+      agent.addChatImages(chatImageIds);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "添加图片失败");
+    }
+  };
+
   const markCount = useMemo(
     () => markableIds(nodes, mediaTargetIds).length,
     [nodes, mediaTargetIds],
@@ -944,6 +960,8 @@ export function CanvasEditor({
             />
 
             <SelectionToolbar
+              chatImageCount={chatImageIds.length}
+              onAddToChat={handleAddToChat}
               selectedIds={selectedIds}
               groupId={groupId}
               canGroup={canGroup}

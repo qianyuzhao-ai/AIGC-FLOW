@@ -16,6 +16,36 @@ const command = (
   args: Record<string, unknown>,
   revision: number | null,
 ): CanvasCommand => ({ id, runId: "run", name, args, expectedRevision: revision });
+test("canvas images added to chat are deduplicated, capped at nine, and survive reopening", () => {
+  const runtime = new ProjectRuntime(9);
+  const nodes = Array.from({ length: 10 }, (_, i) => ({
+    id: `image-${i}`,
+    type: "media",
+    position: { x: 0, y: 0 },
+    data: {
+      label: `Image ${i}`,
+      kind: "image",
+      status: "ready",
+      url: `https://test.bcebos.com/${i}.png`,
+    },
+  }));
+  runtime.bind({
+    read: () => ({ nodes, edges: [], viewport: { x: 0, y: 0, zoom: 1 }, center: { x: 0, y: 0 } }),
+    apply: () => {},
+    save: async () => true,
+    focus: () => {},
+  });
+  runtime.addChatImages(["image-0"]);
+  assert.equal(runtime.getSnapshot().chatOpen, true);
+  runtime.setChatOpen(false);
+  runtime.addChatImages(nodes.slice(0, 9).map((node) => node.id));
+  assert.equal(runtime.getSnapshot().draftImages.length, 9);
+  assert.throws(() => runtime.addChatImages(["image-9"]), /最多添加 9 张/);
+  assert.equal(runtime.getSnapshot().draftImages.length, 9);
+  runtime.removeChatImage("image-0");
+  runtime.addChatImages(["image-9"]);
+  assert.equal(runtime.getSnapshot().draftImages.length, 9);
+});
 test("canvas executor rejects stale edits, deduplicates commands and reports failed saves", async () => {
   const runtime = new ProjectRuntime(1);
   let state: CanvasState = {

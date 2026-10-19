@@ -44,40 +44,68 @@ function imageMime(bytes: Buffer) {
   throw new Error("只支持 PNG、JPEG、WebP、GIF 图片，不能将视频或其他文件作为图片发送");
 }
 
+export async function readImage(url: string, signal?: AbortSignal) {
+  if (!isAllowedMediaSource(url)) throw new Error("只支持本服务托管的图片");
+  const timeout = AbortSignal.timeout(30_000);
+  const response = await fetch(url, {
+    redirect: "error",
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  });
+  if (!response.ok || !response.body) throw new Error("无法读取图片，请检查素材是否仍然有效");
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_IMAGE_BYTES) {
+        await reader.cancel();
+        throw new Error("单张图片最多 10 MB");
+      }
+      parts.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = Buffer.concat(parts);
+  return { bytes, mimeType: imageMime(bytes) };
+}
+
 export async function loadImages(attachments: PiImageAttachment[], signal?: AbortSignal) {
   const images: ImageContent[] = [];
   let total = 0;
-  const timeout = AbortSignal.timeout(30_000);
+  const { sdk } = await getPiRuntime();
   for (const attachment of attachments) {
-    const response = await fetch(attachment.url, {
-      redirect: "error",
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
-    if (!response.ok || !response.body) throw new Error(`无法读取图片「${attachment.label}」`);
-    const reader = response.body.getReader();
-    const parts: Uint8Array[] = [];
-    let size = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        total += value.length;
-        if (size > MAX_IMAGE_BYTES || total > MAX_TOTAL_BYTES) {
-          await reader.cancel();
-          throw new Error("图片过大：单张最多 10 MB，每次合计最多 20 MB");
-        }
-        parts.push(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    const bytes = Buffer.concat(parts);
-    const { sdk } = await getPiRuntime();
-    const normalized = await sdk.resizeImage(bytes, imageMime(bytes));
+    const { bytes, mimeType } = await readImage(attachment.url, signal);
+    total += bytes.length;
+    if (total > MAX_TOTAL_BYTES) throw new Error("图片合计最多 20 MB");
+    const normalized = await sdk.resizeImage(bytes, mimeType);
     if (!normalized)
       throw new Error(`图片「${attachment.label}」无法解码或超过模型图片限制，请更换图片`);
     images.push({ type: "image", data: normalized.data, mimeType: normalized.mimeType });
   }
   return images;
+}
+
+const thumbnails = new Map<string, { bytes: Buffer; mimeType: string }>();
+export async function imageThumbnail(url: string, signal?: AbortSignal) {
+  const cached = thumbnails.get(url);
+  if (cached) return cached;
+  const { bytes, mimeType } = await readImage(url, signal);
+  const { sdk } = await getPiRuntime();
+  const thumbnail = await sdk.resizeImage(bytes, mimeType, {
+    maxWidth: 854,
+    maxHeight: 480,
+    maxBytes: 512 * 1024,
+  });
+  if (!thumbnail) throw new Error("图片无法生成缩略图");
+  const result = { bytes: Buffer.from(thumbnail.data, "base64"), mimeType: thumbnail.mimeType };
+  thumbnails.set(url, result);
+  if (thumbnails.size > 32) {
+    const oldest = thumbnails.keys().next().value;
+    if (oldest) thumbnails.delete(oldest);
+  }
+  return result;
 }

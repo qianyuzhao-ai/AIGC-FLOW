@@ -41,12 +41,13 @@ export async function getPiConfiguration(): Promise<PiConfiguration> {
           ...(provider.id.startsWith("custom-") && custom.success ? { custom: custom.data } : {}),
           models: models
             .getModels(provider.id)
-            .map(({ id, name, contextWindow, maxTokens, input }) => ({
+            .map(({ id, name, contextWindow, maxTokens, input, reasoning }) => ({
               id,
               name,
               contextWindow,
               maxTokens,
               input,
+              reasoning,
             })),
         };
       })
@@ -86,6 +87,7 @@ async function saveConnection(input: PiConnection) {
           contextWindow,
           maxTokens,
           input: input.custom.input,
+          reasoning: input.custom.reasoning,
         },
       ],
     };

@@ -6,9 +6,12 @@ import {
   canvasToolSchemas,
   type GenerationJobView,
   generationJobViewSchema,
+  MAX_PI_IMAGES,
   type PiChatMessage,
   type PiConversation,
   type PiImageAttachment,
+  type PiSessionInfo,
+  type PiThinkingLevel,
 } from "@aigc-flow/shared";
 import { api } from "../api";
 import { apiError } from "../api-error";
@@ -20,6 +23,10 @@ import { applyCanvasTool, type CanvasBinding } from "./canvas-tools";
 import { generationRequest } from "./generation-input";
 
 type View = {
+  chatOpen: boolean;
+  draftImages: PiImageAttachment[];
+  sessionInfo: PiSessionInfo | null;
+  thinkingLevel?: PiThinkingLevel;
   conversationId: string | null;
   conversations: PiConversation[];
   messages: PiChatMessage[];
@@ -30,6 +37,9 @@ type View = {
   error: string;
 };
 const initial: View = {
+  chatOpen: false,
+  draftImages: [],
+  sessionInfo: null,
   conversationId: null,
   conversations: [],
   messages: [],
@@ -89,6 +99,53 @@ export class ProjectRuntime {
   focus(ids: string[]) {
     this.binding?.focus(ids);
   }
+  setChatOpen = (chatOpen: boolean) => this.patch({ chatOpen });
+  addChatImages(nodeIds: string[]) {
+    if (this.view.loading) throw new Error("正在处理请求，请稍后添加图片");
+    const available = this.canvasImages();
+    const images = new Map(this.view.draftImages.map((image) => [image.nodeId, image]));
+    for (const id of nodeIds) {
+      const image = available.find((item) => item.nodeId === id);
+      if (!image) throw new Error("所选图片尚未就绪或已不存在");
+      images.set(id, image);
+    }
+    if (images.size > MAX_PI_IMAGES) throw new Error(`每条消息最多添加 ${MAX_PI_IMAGES} 张图片`);
+    this.patch({ draftImages: [...images.values()], chatOpen: true, error: "" });
+  }
+  removeChatImage(nodeId: string) {
+    this.patch({ draftImages: this.view.draftImages.filter((image) => image.nodeId !== nodeId) });
+  }
+  setThinkingLevel(thinkingLevel: PiThinkingLevel) {
+    if (this.view.sessionInfo?.thinkingLevels.includes(thinkingLevel))
+      this.patch({ thinkingLevel });
+  }
+  async refreshSessionInfo() {
+    const conversationId = this.view.conversationId;
+    try {
+      const response = await api.api.pi.projects[":projectId"]["session-info"].$get({
+        param: { projectId: String(this.projectId) },
+        query: { conversationId: conversationId ?? undefined },
+      });
+      if (!response.ok) throw await apiError(response);
+      const sessionInfo = await response.json();
+      if (this.view.conversationId !== conversationId) return;
+      const sameModel =
+        sessionInfo.model?.id === this.view.sessionInfo?.model?.id &&
+        sessionInfo.model?.provider === this.view.sessionInfo?.model?.provider;
+      this.patch({
+        sessionInfo,
+        thinkingLevel:
+          sameModel &&
+          this.view.thinkingLevel &&
+          sessionInfo.thinkingLevels.includes(this.view.thinkingLevel)
+            ? this.view.thinkingLevel
+            : undefined,
+      });
+    } catch (error) {
+      if (this.view.conversationId === conversationId)
+        this.patch({ error: error instanceof Error ? error.message : "读取模型信息失败" });
+    }
+  }
   canvasImages(): PiImageAttachment[] {
     return this.canvas()
       .read()
@@ -133,7 +190,10 @@ export class ProjectRuntime {
       });
       if (!res.ok) throw await apiError(res);
       const value = await res.json();
-      this.patch(value);
+      const switching =
+        this.view.conversationId !== null && this.view.conversationId !== value.conversationId;
+      this.patch({ ...value, ...(switching ? { draftImages: [], thinkingLevel: undefined } : {}) });
+      void this.refreshSessionInfo();
       if (value.run?.status === "running") void this.connect(value.run.id);
     } catch (error) {
       this.patch({ error: error instanceof Error ? error.message : "读取对话失败" });
@@ -166,12 +226,14 @@ export class ProjectRuntime {
           selectedNodeIds,
           conversationId: this.view.conversationId ?? undefined,
           imageNodeIds,
+          thinkingLevel: this.view.thinkingLevel ?? this.view.sessionInfo?.thinkingLevel,
         },
       });
       if (!res.ok) throw await apiError(res);
       const { runId, conversationId } = await res.json();
       this.patch({
         conversationId,
+        draftImages: [],
         commands: [],
         messages: [
           ...this.view.messages,
@@ -238,6 +300,7 @@ export class ProjectRuntime {
             this.activeFinish?.();
             this.activeFinish = undefined;
             void this.refreshConversations();
+            void this.refreshSessionInfo();
             return;
           }
         }
@@ -250,7 +313,7 @@ export class ProjectRuntime {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
-  private async refreshConversations() {
+  async refreshConversations() {
     try {
       const response = await api.api.pi.projects[":projectId"].conversations.$get({
         param: { projectId: String(this.projectId) },
