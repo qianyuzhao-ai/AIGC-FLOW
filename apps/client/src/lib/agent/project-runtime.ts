@@ -11,6 +11,7 @@ import {
   type PiConversation,
   type PiImageAttachment,
   type PiSessionInfo,
+  type PiSkill,
   type PiThinkingLevel,
 } from "@aigc-flow/shared";
 import { api } from "../api";
@@ -23,6 +24,7 @@ import { applyCanvasTool, type CanvasBinding } from "./canvas-tools";
 import { generationRequest } from "./generation-input";
 
 type View = {
+  skills: PiSkill[];
   chatOpen: boolean;
   draftImages: PiImageAttachment[];
   sessionInfo: PiSessionInfo | null;
@@ -37,6 +39,7 @@ type View = {
   error: string;
 };
 const initial: View = {
+  skills: [],
   chatOpen: false,
   draftImages: [],
   sessionInfo: null,
@@ -146,6 +149,15 @@ export class ProjectRuntime {
         this.patch({ error: error instanceof Error ? error.message : "读取模型信息失败" });
     }
   }
+  async refreshSkills() {
+    try {
+      const response = await api.api.pi.skills.$get();
+      if (!response.ok) throw await apiError(response);
+      this.patch({ skills: (await response.json()).skills.filter((skill) => skill.enabled) });
+    } catch (error) {
+      this.patch({ error: error instanceof Error ? error.message : "读取技能列表失败" });
+    }
+  }
   canvasImages(): PiImageAttachment[] {
     return this.canvas()
       .read()
@@ -209,6 +221,7 @@ export class ProjectRuntime {
         this.view.conversationId !== null && this.view.conversationId !== value.conversationId;
       this.patch({ ...value, ...(switching ? { draftImages: [], thinkingLevel: undefined } : {}) });
       void this.refreshSessionInfo();
+      void this.refreshSkills();
       if (value.run?.status === "running") void this.connect(value.run.id);
     } catch (error) {
       this.patch({ error: error instanceof Error ? error.message : "读取对话失败" });

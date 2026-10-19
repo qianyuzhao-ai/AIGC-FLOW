@@ -4,13 +4,20 @@ import {
   MAX_PI_IMAGES,
   type PiImageAttachment,
   type PiSessionInfo,
+  type PiSkill,
   type PiThinkingLevel,
 } from "@aigc-flow/shared";
-import { ArrowUp, Square, X } from "lucide-react";
+import { ArrowUp, BookOpen, Square, X } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
 import { PiChatStatus } from "@/components/pi-chat-status";
 import { PiThumbnail } from "@/components/pi-thumbnail";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProjectRuntime } from "@/lib/agent/project-runtime";
 
@@ -22,6 +29,7 @@ export function PiChatInput({
   images,
   sessionInfo,
   thinkingLevel,
+  skills,
 }: {
   runtime: ProjectRuntime;
   busy: boolean;
@@ -30,6 +38,7 @@ export function PiChatInput({
   images: PiImageAttachment[];
   sessionInfo: PiSessionInfo | null;
   thinkingLevel?: PiThinkingLevel;
+  skills: PiSkill[];
 }) {
   const [draft, setDraft] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
@@ -103,9 +112,51 @@ export function PiChatInput({
           }}
         />
         <div className="flex items-center justify-between gap-2">
-          <span className="px-2 text-muted-foreground text-xs">
-            画布选图 · {images.length}/{MAX_PI_IMAGES}
-          </span>
+          <div className="flex items-center gap-1">
+            {skills.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={loading}
+                    aria-label="使用技能"
+                  >
+                    <BookOpen />
+                    技能
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  className="max-h-72 w-72 overflow-y-auto"
+                >
+                  {skills.map((skill) => (
+                    <DropdownMenuItem
+                      key={skill.name}
+                      className="flex-col items-start"
+                      onSelect={() => {
+                        setDraft(
+                          (current) =>
+                            `/skill:${skill.name} ${current.replace(/^\/skill:\S+\s*/, "")}`,
+                        );
+                        requestAnimationFrame(() => input.current?.focus());
+                      }}
+                    >
+                      <span>{skill.name}</span>
+                      <span className="line-clamp-2 text-muted-foreground text-xs">
+                        {skill.description}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <span className="px-2 text-muted-foreground text-xs">
+              画布选图 · {images.length}/{MAX_PI_IMAGES}
+            </span>
+          </div>
           {busy ? (
             <Button
               type="button"

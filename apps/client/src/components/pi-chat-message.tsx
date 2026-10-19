@@ -6,7 +6,7 @@ import {
   type GenerationJobView,
   type PiChatMessage,
 } from "@aigc-flow/shared";
-import { CircleCheck, CircleX, Crosshair, LoaderCircle, Wrench } from "lucide-react";
+import { BookOpen, CircleCheck, CircleX, Crosshair, LoaderCircle, Wrench } from "lucide-react";
 import { PiMarkdown } from "@/components/pi-markdown";
 import { PiThumbnail } from "@/components/pi-thumbnail";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -168,6 +168,21 @@ export function PiChatMessageRow({
                   <ToolResult key={command.id} command={command} jobs={jobs} onFocus={onFocus} />
                 ))}
               </section>
+            )}
+            {message.skillReads && message.skillReads.length > 0 && (
+              <details className="rounded-md border bg-background/50 p-2 text-xs">
+                <summary className="flex cursor-pointer items-center gap-2">
+                  <BookOpen className="size-3.5" />
+                  已读取技能资料 · {message.skillReads.length}
+                </summary>
+                <ul className="mt-2 space-y-1 text-muted-foreground">
+                  {message.skillReads.map((read) => (
+                    <li key={`${read.name}/${read.file}`} className="break-all">
+                      {read.name} / {read.file}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
             {streaming && (
               <p role="status" className="flex items-center gap-2 text-muted-foreground text-xs">

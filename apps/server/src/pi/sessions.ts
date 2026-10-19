@@ -17,6 +17,13 @@ import { commandViews } from "./bridge";
 import { getConfiguredModel } from "./configuration";
 import { getConversation, legacyConversationId } from "./conversations";
 import { agentDir, agentWorkspace, getPiRuntime } from "./runtime";
+import {
+  installedSkillResources,
+  installedSkillsPrompt,
+  rememberSessionSkills,
+  skillReadTool,
+} from "./skills/resources";
+import { skillRegistry } from "./skills/store";
 import { canvasTools } from "./tools";
 
 const sessions = new Map<string, Promise<AgentSession>>();
@@ -27,6 +34,7 @@ function sessionDirectory(projectId: number, conversationId: string) {
 }
 
 async function createProjectSession(projectId: number, conversationId: string) {
+  const skillRevision = skillRegistry().revision;
   const { sdk, models } = await getPiRuntime();
   const model = await getConfiguredModel();
   const cwd = join(agentWorkspace, String(projectId));
@@ -43,6 +51,9 @@ async function createProjectSession(projectId: number, conversationId: string) {
     settingsManager,
     noExtensions: true,
     noSkills: true,
+    // 默认目录扫描保持关闭，只加载应用安装清单中的技能。
+    skillsOverride: () => ({ skills: installedSkillResources(sdk), diagnostics: [] }),
+    appendSystemPromptOverride: () => [installedSkillsPrompt(sdk)],
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
@@ -51,6 +62,7 @@ async function createProjectSession(projectId: number, conversationId: string) {
   });
   await resourceLoader.reload();
   const sessionManager = sdk.SessionManager.continueRecent(cwd, sessionDir);
+  const tools = [...canvasTools(projectId), skillReadTool()];
   const { session } = await sdk.createAgentSession({
     cwd,
     agentDir,
@@ -59,12 +71,13 @@ async function createProjectSession(projectId: number, conversationId: string) {
     thinkingLevel:
       piThinkingLevelSchema.safeParse(sessionManager.buildSessionContext().thinkingLevel).data ??
       "off",
-    customTools: canvasTools(projectId),
-    tools: canvasTools(projectId).map((tool) => tool.name),
+    customTools: tools,
+    tools: tools.map((tool) => tool.name),
     resourceLoader,
     settingsManager,
     sessionManager,
   });
+  rememberSessionSkills(session, skillRevision);
   return session;
 }
 
@@ -177,6 +190,23 @@ export function chatMessages(session: Pick<AgentSession, "sessionManager">): PiC
     }
     if (entry.type !== "message") continue;
     const { message } = entry;
+    if (
+      message.role === "toolResult" &&
+      message.toolName === "read_skill" &&
+      !message.isError &&
+      assistant
+    ) {
+      const read = z.object({ skill: z.string(), file: z.string() }).safeParse(message.details);
+      if (read.success) {
+        assistant.skillReads ??= [];
+        if (
+          !assistant.skillReads.some(
+            (item) => item.name === read.data.skill && item.file === read.data.file,
+          )
+        )
+          assistant.skillReads.push({ name: read.data.skill, file: read.data.file });
+      }
+    }
     if (message.role === "toolResult" && !turn && assistant) {
       const command = assistant.commands.find((item) => item.id === message.toolCallId);
       if (command) {

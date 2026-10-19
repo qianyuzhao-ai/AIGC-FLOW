@@ -15,6 +15,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { z } from "zod";
 import { applyCanvasTool, type CanvasState } from "../../../client/src/lib/agent/canvas-tools";
 import { readPiStream } from "../../../client/src/lib/pi-stream";
+import { skillManifest, skillZip } from "./skills/test-archive";
 
 const historySchema = z.object({
   messages: z.array(piChatMessageSchema),
@@ -122,6 +123,18 @@ const upstream = createServer(async (request, response) => {
   const userIndex = body.messages.findLastIndex(
     (message: { role: string }) => message.role === "user",
   );
+  if (JSON.stringify(body.messages[userIndex]?.content).includes("use-installed-skill")) {
+    const count = body.messages
+      .slice(userIndex + 1)
+      .filter((message: { role: string }) => message.role === "tool").length;
+    if (count < 2) {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(
+        `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `skill-${count}`, type: "function", function: { name: "read_skill", arguments: JSON.stringify({ name: "integration-guide", file: count ? "references/checklist.md" : "SKILL.md" }) } }] }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`,
+      );
+      return;
+    }
+  }
   if (JSON.stringify(body.messages[userIndex]?.content).includes("tool-loop")) {
     const results = body.messages
       .slice(userIndex + 1)
@@ -842,6 +855,106 @@ test("Pi configuration and project conversation", async (t) => {
       const file = session.sessionManager.getSessionFile();
       assert.ok(file);
       assert.equal(sdk.SessionManager.open(file).buildSessionContext().thinkingLevel, "high");
+    },
+  );
+  await t.test(
+    "installed skills refresh existing sessions, load references and expand explicit commands",
+    async () => {
+      const bytes = skillZip([
+        {
+          name: "guide/SKILL.md",
+          content: `${skillManifest("integration-guide")}\nONLY_IN_FULL_SKILL_TEXT\n`,
+        },
+        { name: "guide/references/checklist.md", content: "REFERENCE_CHECKLIST_CONTENT" },
+      ]);
+      const form = new FormData();
+      form.set("file", new File([new Uint8Array(bytes)], "guide.skill"));
+      const previewResponse = await app.request("/api/pi/skills/preview", {
+        method: "POST",
+        body: form,
+      });
+      const preview = (await previewResponse.json()) as { id: string; skills: { id: string }[] };
+      assert.equal(
+        (
+          await jsonRequest("/api/pi/skills/install", {
+            previewId: preview.id,
+            skillId: preview.skills[0]?.id,
+          })
+        ).status,
+        201,
+      );
+      const before = received.length;
+      const runId = await startChat("use-installed-skill");
+      await collect(readPiStream(await eventsFor(runId)));
+      const completed = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.equal(completed.run?.status, "completed", completed.run?.error ?? "");
+      const firstRequest = JSON.stringify(received[before]?.body);
+      assert.ok(
+        firstRequest.includes("integration-guide"),
+        "installed skill missing from model request",
+      );
+      assert.ok(!firstRequest.includes("ONLY_IN_FULL_SKILL_TEXT"));
+      const finalRequest = received.at(-1)?.body as {
+        messages: { role: string; content: unknown }[];
+      };
+      assert.ok(
+        JSON.stringify(finalRequest).includes("REFERENCE_CHECKLIST_CONTENT"),
+        JSON.stringify(
+          finalRequest.messages
+            .filter((message) => message.role === "tool")
+            .map((message) => message.content),
+        ),
+      );
+      const session = await getProjectSession(first.id);
+      assert.ok(session.getActiveToolNames().includes("read_skill"));
+      for (const tool of ["bash", "read", "write", "edit"])
+        assert.ok(!session.getActiveToolNames().includes(tool));
+      const history = historySchema.parse(await (await app.request(chatPath)).json());
+      assert.deepEqual(history.messages.at(-1)?.skillReads, [
+        { name: "integration-guide", file: "SKILL.md" },
+        { name: "integration-guide", file: "references/checklist.md" },
+      ]);
+      const explicit = await startChat("/skill:integration-guide explain the steps");
+      await collect(readPiStream(await eventsFor(explicit)));
+      const request = received.at(-1)?.body as { messages: { role: string; content: unknown }[] };
+      const user = JSON.stringify(
+        request.messages.findLast((message) => message.role === "user")?.content,
+      );
+      assert.ok(user.includes("ONLY_IN_FULL_SKILL_TEXT") && user.includes("explain the steps"));
+      const commandOnly = await jsonRequest(chatPath, {
+        message: "/skill:integration-guide",
+        clientId,
+        requestId: crypto.randomUUID(),
+        selectedNodeIds: ["selected-node"],
+      });
+      assert.equal(commandOnly.status, 202);
+      const commandRun = (await commandOnly.json()) as { runId: string };
+      await collect(readPiStream(await eventsFor(commandRun.runId)));
+      const commandRequest = received.at(-1)?.body as {
+        messages: { role: string; content: unknown }[];
+      };
+      const commandUser = JSON.stringify(
+        commandRequest.messages.findLast((message) => message.role === "user")?.content,
+      );
+      assert.ok(
+        commandUser.includes("ONLY_IN_FULL_SKILL_TEXT") && commandUser.includes("selected-node"),
+      );
+      assert.equal(
+        (await jsonRequest("/api/pi/skills/integration-guide", { enabled: false }, "PATCH")).status,
+        200,
+      );
+      assert.equal(
+        (
+          await jsonRequest(chatPath, {
+            message: "/skill:integration-guide",
+            clientId,
+            requestId: crypto.randomUUID(),
+          })
+        ).status,
+        400,
+      );
+      await collect(readPiStream(await eventsFor(await startChat("after disabling skill"))));
+      assert.equal(session.resourceLoader.getSkills().skills.length, 0);
     },
   );
 });

@@ -88,6 +88,7 @@ export const piChatMessageSchema = z.object({
   text: z.string(),
   runId: z.string().optional(),
   error: z.string().nullable().optional(),
+  skillReads: z.array(z.object({ name: z.string(), file: z.string() })).optional(),
   attachments: z
     .array(z.object({ nodeId: z.string(), label: z.string(), url: z.string() }))
     .default([]),

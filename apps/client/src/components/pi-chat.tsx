@@ -111,6 +111,11 @@ function PiChatPanel({
     window.addEventListener("pi-configuration-changed", refresh);
     return () => window.removeEventListener("pi-configuration-changed", refresh);
   }, [runtime]);
+  useEffect(() => {
+    const refresh = () => void runtime.refreshSkills();
+    window.addEventListener("pi-skills-changed", refresh);
+    return () => window.removeEventListener("pi-skills-changed", refresh);
+  }, [runtime]);
 
   return (
     <motion.aside
@@ -264,6 +269,7 @@ function PiChatPanel({
           images={state.draftImages}
           sessionInfo={state.sessionInfo}
           thinkingLevel={state.thinkingLevel}
+          skills={state.skills}
         />
       </div>
     </motion.aside>

@@ -5,6 +5,7 @@ import { Settings } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { SettingsField } from "@/components/settings-field";
 import { SettingsPiSection } from "@/components/settings-pi-section";
+import { SettingsSkillsSection } from "@/components/settings-skills-section";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -131,10 +132,14 @@ export function SettingsDialog() {
         <Tabs defaultValue="pi">
           <TabsList>
             <TabsTrigger value="pi">Pi 模型</TabsTrigger>
+            <TabsTrigger value="skills">Pi 技能</TabsTrigger>
             <TabsTrigger value="service">内网服务</TabsTrigger>
           </TabsList>
           <TabsContent value="pi" className="max-h-[65vh] overflow-y-auto pr-1">
             <SettingsPiSection />
+          </TabsContent>
+          <TabsContent value="skills" className="max-h-[65vh] overflow-y-auto pr-1">
+            <SettingsSkillsSection />
           </TabsContent>
           <TabsContent value="service">
             <form onSubmit={handleSubmit}>

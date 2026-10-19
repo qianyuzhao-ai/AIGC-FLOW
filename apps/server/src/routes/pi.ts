@@ -7,6 +7,7 @@ import { imageThumbnail } from "../pi/images";
 import { discoverPiModels } from "../pi/model-discovery";
 import { getPiRuntime } from "../pi/runtime";
 import { piRunsRoute } from "./pi-runs";
+import { piSkillsRoute } from "./pi-skills";
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Pi 请求失败");
 
@@ -47,4 +48,5 @@ export const piRoute = new Hono()
       model: model.id,
     });
   })
-  .route("/projects", piRunsRoute);
+  .route("/projects", piRunsRoute)
+  .route("/skills", piSkillsRoute);
