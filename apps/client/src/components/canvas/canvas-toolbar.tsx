@@ -4,7 +4,7 @@ import { NODE_MARK_LABEL, type NodeMark, type Project } from "@aigc-flow/shared"
 import { ChevronLeft, CircleCheck, CircleDashed, CircleX } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { type RefObject, useSyncExternalStore } from "react";
 import { useProjectAgent } from "@/components/agent-workspace";
 import { ProjectName } from "@/components/canvas/project-name";
 import { SaveIndicator } from "@/components/canvas/save-indicator";
@@ -150,16 +150,24 @@ export function CanvasInfoGroup({
   );
 }
 
-export function CanvasActionGroup({ projectId }: { projectId: number }) {
+export function CanvasActionGroup({
+  projectId,
+  paletteRef,
+  controlsRef,
+}: {
+  projectId: number;
+  paletteRef: RefObject<HTMLDivElement | null>;
+  controlsRef: RefObject<HTMLDivElement | null>;
+}) {
   const runtime = useProjectAgent(projectId);
   const chatOpen = useSyncExternalStore(
     runtime.subscribe,
     () => runtime.getSnapshot().chatOpen,
     () => false,
   );
-  const resize = usePiChatResize(chatOpen);
   const reducedMotion = useReducedMotion();
   const transition = piChatTransition(chatOpen, reducedMotion);
+  const resize = usePiChatResize(chatOpen, paletteRef, controlsRef, transition);
   return (
     <div
       ref={resize.toolbarRef}
