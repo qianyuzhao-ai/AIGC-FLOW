@@ -66,6 +66,16 @@ export const generations = sqliteTable(
 
 export type GenerationRow = typeof generations.$inferSelect;
 
+export const agentConversations = sqliteTable("agent_conversations", {
+  id: text("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull().default("新对话"),
+  createdAt: text("created_at").notNull().default(isoNow),
+  updatedAt: text("updated_at").notNull().default(isoNow),
+});
+
 export const agentRuns = sqliteTable(
   "agent_runs",
   {
@@ -74,6 +84,7 @@ export const agentRuns = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     requestId: text("request_id").notNull(),
+    conversationId: text("conversation_id").references(() => agentConversations.id),
     clientId: text("client_id").notNull(),
     input: text("input").notNull().default("{}"),
     status: text("status").notNull(),

@@ -7,16 +7,21 @@ import {
   type GenerationJobView,
   generationJobViewSchema,
   type PiChatMessage,
+  type PiConversation,
+  type PiImageAttachment,
 } from "@aigc-flow/shared";
 import { api } from "../api";
 import { apiError } from "../api-error";
 import { beginDesktopTask } from "../desktop-tasks";
 import { toPersistedGraph } from "../graph";
+import { nodeMediaOf } from "../node-media";
 import { readPiStream } from "../pi-stream";
 import { applyCanvasTool, type CanvasBinding } from "./canvas-tools";
 import { generationRequest } from "./generation-input";
 
 type View = {
+  conversationId: string | null;
+  conversations: PiConversation[];
   messages: PiChatMessage[];
   run: AgentRunView | null;
   commands: AgentCommandView[];
@@ -25,6 +30,8 @@ type View = {
   error: string;
 };
 const initial: View = {
+  conversationId: null,
+  conversations: [],
   messages: [],
   run: null,
   commands: [],
@@ -82,11 +89,47 @@ export class ProjectRuntime {
   focus(ids: string[]) {
     this.binding?.focus(ids);
   }
-  async load() {
+  canvasImages(): PiImageAttachment[] {
+    return this.canvas()
+      .read()
+      .nodes.flatMap((node) => {
+        const media = nodeMediaOf(node);
+        return media?.kind === "image"
+          ? [
+              {
+                nodeId: node.id,
+                label: String(node.data.label ?? "图片"),
+                url: media.url,
+              },
+            ]
+          : [];
+      });
+  }
+  async newConversation() {
+    if (this.view.loading || this.view.run?.status === "running") return;
+    this.patch({ loading: true, error: "" });
+    try {
+      const response = await api.api.pi.projects[":projectId"].conversations.$post({
+        param: { projectId: String(this.projectId) },
+      });
+      if (!response.ok) throw await apiError(response);
+      const conversation = await response.json();
+      this.patch({ loading: false });
+      await this.load(conversation.id);
+    } catch (error) {
+      this.patch({
+        loading: false,
+        error: error instanceof Error ? error.message : "创建对话失败",
+      });
+    }
+  }
+  async load(conversationId = this.view.conversationId) {
+    if (this.view.loading || this.view.run?.status === "running") return;
     this.patch({ loading: true, error: "" });
     try {
       const res = await api.api.pi.projects[":projectId"].messages.$get({
         param: { projectId: String(this.projectId) },
+        query: { conversationId: conversationId ?? undefined },
       });
       if (!res.ok) throw await apiError(res);
       const value = await res.json();
@@ -98,7 +141,8 @@ export class ProjectRuntime {
       this.patch({ loading: false });
     }
   }
-  async send(message: string) {
+  async send(message: string, imageNodeIds: string[] = []) {
+    if (this.view.loading) throw new Error("正在处理请求");
     if (this.view.run?.status === "running") throw new Error("当前项目仍有任务运行");
     const selectedNodeIds = this.canvas()
       .read()
@@ -106,13 +150,41 @@ export class ProjectRuntime {
       .map((node) => node.id);
     this.patch({ loading: true, error: "" });
     try {
+      const attachments = imageNodeIds.map((id) => {
+        const image = this.canvasImages().find((item) => item.nodeId === id);
+        if (!image) throw new Error("选择的图片已不可用，请重新选择");
+        return image;
+      });
+      if (attachments.length && !(await this.canvas().save()))
+        throw new Error("画布保存失败，图片尚未发送");
       const res = await api.api.pi.projects[":projectId"].messages.$post({
         param: { projectId: String(this.projectId) },
-        json: { message, clientId: this.clientId, requestId: crypto.randomUUID(), selectedNodeIds },
+        json: {
+          message,
+          clientId: this.clientId,
+          requestId: crypto.randomUUID(),
+          selectedNodeIds,
+          conversationId: this.view.conversationId ?? undefined,
+          imageNodeIds,
+        },
       });
       if (!res.ok) throw await apiError(res);
-      const { runId } = await res.json();
+      const { runId, conversationId } = await res.json();
       this.patch({
+        conversationId,
+        commands: [],
+        messages: [
+          ...this.view.messages,
+          { id: `${runId}-user`, role: "user", text: message, runId, attachments, commands: [] },
+          {
+            id: `${runId}-assistant`,
+            role: "assistant",
+            text: "",
+            runId,
+            attachments: [],
+            commands: [],
+          },
+        ],
         run: {
           id: runId,
           projectId: this.projectId,
@@ -120,6 +192,7 @@ export class ProjectRuntime {
           status: "running",
           error: null,
           partial: "",
+          conversationId,
         },
       });
       this.activeFinish?.();
@@ -151,7 +224,12 @@ export class ProjectRuntime {
             continue;
           }
           if (event.type !== "state") continue;
-          this.patch({ ...event, error: event.run?.error ?? "" });
+          this.patch({
+            messages: event.messages,
+            run: event.run,
+            commands: event.commands,
+            error: event.run?.error ?? "",
+          });
           if (event.run?.clientId === this.clientId && event.run.status === "running") {
             for (const command of event.commands.filter((item) => item.status === "pending"))
               void this.deliver(command);
@@ -159,6 +237,7 @@ export class ProjectRuntime {
           if (event.run?.status !== "running") {
             this.activeFinish?.();
             this.activeFinish = undefined;
+            void this.refreshConversations();
             return;
           }
         }
@@ -169,6 +248,17 @@ export class ProjectRuntime {
         });
       }
       await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+  private async refreshConversations() {
+    try {
+      const response = await api.api.pi.projects[":projectId"].conversations.$get({
+        param: { projectId: String(this.projectId) },
+      });
+      if (!response.ok) throw await apiError(response);
+      this.patch(await response.json());
+    } catch (error) {
+      this.patch({ error: error instanceof Error ? error.message : "读取历史对话失败" });
     }
   }
   async stop() {

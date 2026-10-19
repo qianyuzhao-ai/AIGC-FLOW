@@ -11,6 +11,7 @@
   "dependencies": {
     "@aigc-flow/server": "workspace:*",
     "@aigc-flow/shared": "workspace:*",
+    "@shadcn/react": "^0.3.1",
     "@xyflow/react": "12.11.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
